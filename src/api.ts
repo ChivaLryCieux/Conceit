@@ -73,10 +73,6 @@ export async function fetchPages(id: string): Promise<string[]> {
   return invoke<string[]>("manga_pages", { id });
 }
 
-export async function fetchCover(id: string): Promise<string | null> {
-  return invoke<string | null>("manga_cover", { id });
-}
-
 /** 某个容器（root 或文件夹）下按排序排列的条目 */
 export function childrenOf(
   index: LibraryIndex,

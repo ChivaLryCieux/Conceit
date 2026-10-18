@@ -1,8 +1,8 @@
 //! Tauri 命令层：书库快照、文件夹、重命名、删除、移动、排序与阅读进度。
 
 use crate::library::{
-    copy_dir_all, extract_zip, now_unix, scan_images, title_from_path, Item, ItemKind,
-    LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
+    copy_dir_all, extract_zip, make_cover_thumb, now_unix, scan_images, title_from_path, Item,
+    ItemKind, LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -125,7 +125,7 @@ pub fn delete_items(state: State<'_, Mutex<AppState>>, ids: Vec<String>) -> Resu
         let removed = st.index.remove_recursive(id);
         removed_all.extend(removed);
     }
-    // 删除漫画在磁盘上的目录
+    // 删除漫画在磁盘上的目录与封面缩略图
     for item in &removed_all {
         if item.kind == ItemKind::Manga {
             let dir = st.root.join(crate::library::MANGA_DIR_NAME).join(&item.id);
@@ -133,6 +133,7 @@ pub fn delete_items(state: State<'_, Mutex<AppState>>, ids: Vec<String>) -> Resu
                 std::fs::remove_dir_all(&dir)
                     .map_err(|e| format!("删除漫画目录失败 {}: {e}", dir.display()))?;
             }
+            crate::library::remove_cover_thumb(&st.root, &item.id);
         }
     }
     st.save()
@@ -218,29 +219,6 @@ pub fn manga_pages(state: State<'_, Mutex<AppState>>, id: String) -> Result<Vec<
         .collect())
 }
 
-/// 取一部漫画的封面绝对路径
-#[tauri::command]
-pub fn manga_cover(state: State<'_, Mutex<AppState>>, id: String) -> Result<Option<String>, String> {
-    let st = lock(&state)?;
-    let item = st
-        .index
-        .item(&id)
-        .ok_or_else(|| "条目不存在".to_string())?;
-    let Some(meta) = item.manga.as_ref() else {
-        return Ok(None);
-    };
-    let Some(cover) = meta.cover.as_ref() else {
-        return Ok(None);
-    };
-    Ok(Some(
-        st.root
-            .join(&meta.dir)
-            .join(cover)
-            .to_string_lossy()
-            .replace('\\', "/"),
-    ))
-}
-
 /// 由路径推断标题（供导入时使用，前端可直接用）
 #[tauri::command]
 pub fn suggest_title(path: String) -> Result<String, String> {
@@ -256,6 +234,8 @@ pub fn update_item_settings(
     show_cover: Option<bool>,
     cover: Option<String>,
 ) -> Result<(), String> {
+    // 先取出根目录，避免与下面的可变借用冲突
+    let root = lock(&state)?.root.clone();
     let mut st = lock(&state)?;
     let item = st
         .index
@@ -278,9 +258,64 @@ pub fn update_item_settings(
         if !meta.pages.iter().any(|p| p == &c) {
             return Err("封面必须是该漫画的某一页".to_string());
         }
-        meta.cover = Some(c);
+        meta.cover = Some(c.clone());
+        // 封面页变了，缩略图要跟着重新生成（生成失败则置空，回退原图）
+        meta.thumb = make_cover_thumb(&root, &id, &c);
     }
     st.save()
+}
+
+/// 为缺失封面缩略图的漫画补生成，返回新生成的数量。
+///
+/// 供应用启动时在后台线程调用。生成一张缩略图需要解码整张原图，耗时可达数百毫秒，
+/// 因此分三段执行，尽量不长时间持有状态锁（否则会阻塞前端的快照请求）。
+pub fn backfill_thumbnails(state: &State<'_, Mutex<AppState>>) -> Result<usize, String> {
+    // 1. 持锁取出待处理清单，随即释放
+    let (root, jobs): (PathBuf, Vec<(String, String)>) = {
+        let st = lock(state)?;
+        let jobs = st
+            .index
+            .items
+            .iter()
+            .filter(|i| i.kind == ItemKind::Manga)
+            .filter_map(|i| {
+                let meta = i.manga.as_ref()?;
+                let cover = meta.cover.clone()?;
+                // 已有缩略图且文件仍在 → 跳过
+                let has_thumb = meta
+                    .thumb
+                    .as_ref()
+                    .is_some_and(|t| st.root.join(t).exists());
+                if has_thumb {
+                    None
+                } else {
+                    Some((i.id.clone(), cover))
+                }
+            })
+            .collect();
+        (st.root.clone(), jobs)
+    };
+
+    // 2. 不持锁生成
+    let mut updates: Vec<(String, String)> = Vec::new();
+    for (id, cover) in &jobs {
+        if let Some(rel) = make_cover_thumb(&root, id, cover) {
+            updates.push((id.clone(), rel));
+        }
+    }
+    let done = updates.len();
+
+    // 3. 一次性写回索引
+    if !updates.is_empty() {
+        let mut st = lock(state)?;
+        for (id, rel) in updates {
+            if let Some(meta) = st.index.item_mut(&id).and_then(|i| i.manga.as_mut()) {
+                meta.thumb = Some(rel);
+            }
+        }
+        st.save()?;
+    }
+    Ok(done)
 }
 
 /// 从本机路径导入漫画：文件夹会递归复制，zip 会解压，均落入 `library/manga/<id>/`。
@@ -327,6 +362,10 @@ pub fn import_sources(
 
         let pages = scan_images(&dest);
         let cover = pages.first().cloned();
+        // 导入即为封面生成缩略图（书架只显示一百多像素，没必要让 WebView 解码原图）
+        let thumb = cover
+            .as_deref()
+            .and_then(|c| make_cover_thumb(&st.root, &id, c));
         let item = Item {
             id: id.clone(),
             kind: ItemKind::Manga,
@@ -336,6 +375,7 @@ pub fn import_sources(
             manga: Some(MangaMeta {
                 dir: rel_dir,
                 cover,
+                thumb,
                 pages,
                 progress: 0.0,
             }),

@@ -4,7 +4,7 @@ mod commands;
 mod library;
 
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -18,6 +18,20 @@ pub fn run() {
             let root = data_dir.join("library");
             let state = commands::AppState::new(root)?;
             app.manage(Mutex::new(state));
+
+            // 启动时后台补生成缺失的封面缩略图（历史数据、手动删过的文件）。
+            // 解码原图较慢，放后台线程做；完成后通知前端刷新，书架立即用上缩略图。
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let state = handle.state::<Mutex<commands::AppState>>();
+                match commands::backfill_thumbnails(&state) {
+                    Ok(0) => {}
+                    Ok(n) => {
+                        let _ = handle.emit("library:thumbnails-ready", n);
+                    }
+                    Err(e) => eprintln!("补生成封面缩略图失败: {e}"),
+                }
+            });
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -30,7 +44,6 @@ pub fn run() {
             commands::reorder,
             commands::save_progress,
             commands::manga_pages,
-            commands::manga_cover,
             commands::suggest_title,
             commands::import_sources,
             commands::update_item_settings,

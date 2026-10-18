@@ -13,6 +13,12 @@ use std::path::{Path, PathBuf};
 pub const INDEX_VERSION: u32 = 1;
 pub const INDEX_FILE_NAME: &str = "index.json";
 pub const MANGA_DIR_NAME: &str = "manga";
+/// 封面缩略图目录（相对书库根目录）
+pub const THUMB_DIR_NAME: &str = "thumbs";
+/// 缩略图长边上限（像素）；原图任一边超过它才生成缩略图
+pub const THUMB_MAX_EDGE: u32 = 480;
+/// 缩略图 JPEG 质量
+pub const THUMB_QUALITY: u8 = 80;
 
 /// 支持的图片扩展名（小写判断）
 pub const IMAGE_EXTENSIONS: [&str; 7] = ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"];
@@ -32,6 +38,10 @@ pub struct MangaMeta {
     /// 封面图片相对路径；无图片时为 None
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
+    /// 封面缩略图路径（相对书库根目录，如 thumbs/m1.jpg）；
+    /// None 表示未生成，前端回退显示原图封面
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<String>,
     /// 全部图片相对路径（自然排序）
     pub pages: Vec<String>,
     /// 阅读进度（0.0 - 1.0）
@@ -260,9 +270,45 @@ impl LibraryIndex {
     }
 }
 
+/// 为漫画封面生成缩略图，返回相对书库根目录的路径（如 `thumbs/m1.jpg`）。
+///
+/// 书架封面只有一百多像素宽，直接加载原图会迫使 WebView 解码整张大图
+/// （扫描漫画常见 3000×4500、单文件数 MB）；这里在导入时预生成一份小图，
+/// 阅读时仍加载原图，画质不受影响。
+/// 原图本身不大于阈值、或解码失败时返回 None，调用方回退到原图封面。
+/// 注意：输出为 JPEG，不带透明通道（漫画封面基本不涉及透明）。
+pub fn make_cover_thumb(root: &Path, id: &str, cover_rel: &str) -> Option<String> {
+    let src = root.join(MANGA_DIR_NAME).join(id).join(cover_rel);
+    let img = image::open(&src).ok()?;
+    let (w, h) = (img.width(), img.height());
+    let longest = w.max(h);
+    if longest <= THUMB_MAX_EDGE {
+        return None; // 原图已经够小，没有必要
+    }
+    let scale = THUMB_MAX_EDGE as f32 / longest as f32;
+    let nw = ((w as f32 * scale).round() as u32).max(1);
+    let nh = ((h as f32 * scale).round() as u32).max(1);
+    let rgb = img.thumbnail(nw, nh).to_rgb8();
+    let dir = root.join(THUMB_DIR_NAME);
+    fs::create_dir_all(&dir).ok()?;
+    let rel = format!("{THUMB_DIR_NAME}/{id}.jpg");
+    let file = fs::File::create(root.join(&rel)).ok()?;
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(file, THUMB_QUALITY);
+    enc.encode(rgb.as_raw(), nw, nh, image::ExtendedColorType::Rgb8)
+        .ok()?;
+    Some(rel)
+}
+
+/// 删除某部漫画的封面缩略图
+pub fn remove_cover_thumb(root: &Path, id: &str) {
+    let path = root.join(THUMB_DIR_NAME).join(format!("{id}.jpg"));
+    if path.exists() {
+        let _ = fs::remove_file(path);
+    }
+}
+
 /// 判断扩展名是否为图片
-pub fn is_image_file(path: &Path) -> bool {
-    path.extension()
+pub fn is_image_file(path: &Path) -> bool {    path.extension()
         .and_then(|e| e.to_str())
         .map(|e| IMAGE_EXTENSIONS.contains(&e.to_lowercase().as_str()))
         .unwrap_or(false)
@@ -453,6 +499,7 @@ mod tests {
             manga: Some(MangaMeta {
                 dir: format!("manga/{id}"),
                 cover: Some("001.jpg".to_string()),
+                thumb: None,
                 pages: vec!["001.jpg".to_string()],
                 progress: 0.0,
             }),
@@ -575,6 +622,56 @@ mod tests {
         let counts = idx.manga_counts();
         assert_eq!(counts.get("f1"), Some(&1));
         assert_eq!(counts.get("f2"), Some(&1));
+    }
+
+    #[test]
+    fn cover_thumb_downscales_large_image() {
+        let root = temp_dir("thumb");
+        let src = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(&src).unwrap();
+        let img = image::RgbImage::from_pixel(600, 900, image::Rgb([200, 60, 60]));
+        img.save(src.join("001.png")).unwrap();
+
+        let rel = make_cover_thumb(&root, "m1", "001.png").expect("应生成缩略图");
+        assert_eq!(rel, "thumbs/m1.jpg");
+        let out = root.join(&rel);
+        assert!(out.exists());
+        // 等比缩放到长边 480
+        let (w, h) = image::image_dimensions(&out).unwrap();
+        assert_eq!((w, h), (320, 480));
+        assert!(
+            fs::metadata(&out).unwrap().len()
+                < fs::metadata(src.join("001.png")).unwrap().len()
+        );
+
+        // 再生成一次应覆盖旧的（封面页变化时依赖这一点）
+        assert_eq!(make_cover_thumb(&root, "m1", "001.png"), Some(rel));
+
+        remove_cover_thumb(&root, "m1");
+        assert!(!out.exists());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cover_thumb_skips_small_and_missing_images() {
+        let root = temp_dir("thumb-small");
+        let src = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(&src).unwrap();
+        // 原图本身不大于阈值 → 不生成
+        image::RgbImage::from_pixel(300, 200, image::Rgb([10, 10, 10]))
+            .save(src.join("001.png"))
+            .unwrap();
+        assert!(make_cover_thumb(&root, "m1", "001.png").is_none());
+        assert!(!root.join(THUMB_DIR_NAME).exists());
+
+        // 文件不存在 / 不是图片 → 返回 None 而不 panic
+        assert!(make_cover_thumb(&root, "m1", "不存在.png").is_none());
+        fs::write(src.join("notes.txt"), b"x").unwrap();
+        assert!(make_cover_thumb(&root, "m1", "notes.txt").is_none());
+
+        // 删除不存在的缩略图不应报错
+        remove_cover_thumb(&root, "m1");
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

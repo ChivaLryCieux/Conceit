@@ -145,6 +145,16 @@ async function main() {
     hasImg === (toggled === true),
     `勾选=${toggled} 卡片有封面图=${hasImg}`
   );
+  const coverSrc = await evalJs(
+    `document.querySelector('.card-manga .card-cover img')?.src ?? null`
+  );
+  // asset 协议会把路径编码，先解码再判断
+  const decodedSrc = coverSrc ? decodeURIComponent(coverSrc) : null;
+  check(
+    "封面加载的是缩略图而非原图",
+    decodedSrc == null || decodedSrc.includes("/thumbs/"),
+    decodedSrc ?? "无封面图"
+  );
 
   /* ---- 3. 重新打开，状态应持久 ---- */
   await tapEl(`[data-card-id="${mangaId}"] .card-settings`);

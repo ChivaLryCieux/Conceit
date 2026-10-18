@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
 import Shelf from "./components/shelf/Shelf";
 import Reader from "./components/reader/Reader";
 import { fetchSnapshot, importSources } from "./api";
@@ -26,6 +27,27 @@ export default function App() {
 
   useEffect(() => {
     void reload();
+  }, [reload]);
+
+  // 启动时的后台缩略图补齐完成后，Rust 会发事件通知；刷新一次书架即可用上
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const stop = await listen<number>("library:thumbnails-ready", () => {
+          if (!cancelled) void reload();
+        });
+        if (cancelled) stop();
+        else unlisten = stop;
+      } catch {
+        // 事件监听失败不影响主流程
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [reload]);
 
   const pushToast = useCallback((text: string, tone: Toast["tone"] = "info") => {

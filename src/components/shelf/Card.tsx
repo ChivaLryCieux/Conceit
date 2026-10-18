@@ -50,11 +50,14 @@ export default function Card({
   onDrop,
 }: Props) {
   const isFolder = item.kind === "folder";
-  const coverPath = item.manga?.cover;
-  const showImage = !isFolder && item.show_cover && coverPath != null;
-  const coverUrl = showImage
-    ? convertFileSrc(`${root}/${item.manga!.dir}/${coverPath}`)
-    : null;
+  const coverPage = item.manga?.cover;
+  // 封面优先用缩略图：书架只显示一百多像素，不必让 WebView 解码原图；
+  // 没有缩略图（老数据 / 生成失败）时回退到原图封面
+  const coverFile =
+    item.manga?.thumb ??
+    (coverPage ? `${item.manga!.dir}/${coverPage}` : null);
+  const showImage = !isFolder && item.show_cover && coverFile != null;
+  const coverUrl = showImage ? convertFileSrc(`${root}/${coverFile}`) : null;
   const progress = item.manga?.progress ?? 0;
   const pageCount = item.manga?.pages.length ?? 0;
   const solid = solidColor(item.id);

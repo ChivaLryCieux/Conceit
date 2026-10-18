@@ -5,8 +5,11 @@ export type ItemKind = "manga" | "folder";
 export interface MangaMeta {
   /** 相对书库根目录 */
   dir: string;
-  /** 封面相对路径 */
+  /** 封面相对路径（漫画目录内的某一页） */
   cover?: string;
+  /** 封面缩略图路径（相对书库根目录，如 thumbs/m1.jpg）；
+   *  缺失时前端回退显示原图封面 */
+  thumb?: string;
   /** 全部图片相对路径（自然排序） */
   pages: string[];
   /** 阅读进度 0-1 */
