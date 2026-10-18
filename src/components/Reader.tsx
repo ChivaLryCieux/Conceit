@@ -30,6 +30,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
   const [zoom, setZoom] = useState(1);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const fractionRef = useRef(item.manga?.progress ?? 0);
   const lastSaveRef = useRef(0);
   const restoreDoneRef = useRef(false);
@@ -143,6 +144,22 @@ export default function Reader({ item, onExit, onToast }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onExit]);
 
+  /* ---------- Ctrl + 滚轮缩放（需非 passive 监听才能阻止浏览器默认缩放） ---------- */
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      // 触控板捏合 / 鼠标滚轮都会带 ctrlKey；按增量做乘性缩放，手感平滑
+      const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      setZoom((z) => clampZoom(z * Math.exp(-d * 0.0015)));
+      setChromeVisible(true); // 缩放时显出框栏，方便看到当前比例
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
   const jumpTo = (f: number) => {
     const el = scrollRef.current;
     if (!el) return;
@@ -152,7 +169,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
   const zoomed = zoom > 1.001;
 
   return (
-    <div className="reader">
+    <div className="reader" ref={rootRef}>
       <div
         className={`reader-topbar${chromeVisible ? "" : " chrome-hidden"}`}
         onClick={(e) => e.stopPropagation()}
@@ -211,7 +228,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
       </div>
 
       <div
-        className="reader-scroll"
+        className={`reader-scroll${chromeVisible ? "" : " chrome-hidden"}`}
         ref={scrollRef}
         onScroll={handleScroll}
         onClick={() => setChromeVisible((v) => !v)}
@@ -240,7 +257,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
 
       {chromeVisible && pages.length > 0 && (
         <div className="reader-hint">
-          点击画面显隐工具栏 · 滚轮 / 方向键翻页 · 框栏内可缩放 · Esc 退出
+          点击画面显隐工具栏 · Ctrl+滚轮缩放 · 滚轮 / 方向键翻页 · Esc 退出
         </div>
       )}
     </div>

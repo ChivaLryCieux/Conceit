@@ -21,7 +21,8 @@ export default defineConfig({
       : undefined,
     watch: {
       // 不要监听 src-tauri 目录
-      ignored: ["**/src-tauri/**"],
+      // 同时忽略外部工具原子写文件留下的 *.tmpdir 临时目录（监听它们会 EBUSY 崩溃）
+      ignored: ["**/src-tauri/**", "**/*.tmpdir/**", "**/.*.tmp"],
     },
   },
   // 让 Tauri 暴露的环境变量在前端可用
