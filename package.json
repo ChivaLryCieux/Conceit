@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Conceit — 一个简洁的本地漫画阅读器（Tauri 2 + React）",
+  "description": "Conceit（幻想阅读器）— 一个简洁的本地漫画阅读器（Tauri 2 + React）",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

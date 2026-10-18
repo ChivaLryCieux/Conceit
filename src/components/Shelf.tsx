@@ -267,7 +267,8 @@ export default function Shelf({
       <header className="shelf-header">
         <div className="shelf-brand">
           <span className="brand-mark">📚</span>
-          <span className="brand-name">Conceit</span>
+          <span className="brand-name">幻想阅读器</span>
+          <span className="brand-sub">Conceit</span>
         </div>
         <nav className="crumbs">
           {breadcrumbs.map((c, i) => (

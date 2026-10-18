@@ -134,6 +134,16 @@ button {
   font-size: 17px;
 }
 
+.brand-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
 .crumbs {
   display: flex;
   align-items: center;
