@@ -1,0 +1,7 @@
+/* Conceit 样式入口：按关注点拆分，构建时由 Vite 内联合并。
+   顺序有意义——base 提供变量与通用动画，后续文件依赖它们。 */
+@import "./base.css";
+@import "./shelf.css";
+@import "./reader.css";
+@import "./overlay.css";
+@import "./mobile.css";

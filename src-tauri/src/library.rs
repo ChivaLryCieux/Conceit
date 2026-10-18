@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -149,6 +149,36 @@ impl LibraryIndex {
             }
         }
         result
+    }
+
+    /// 递归统计每个文件夹内（含子文件夹）的漫画数量：文件夹 id -> 数量
+    ///
+    /// 先建父指针表，再逐部漫画沿父链向上累加，复杂度 O(n × 深度)。
+    /// 放在数据层算一次，避免前端为每个文件夹卡片重复做线性查找。
+    pub fn manga_counts(&self) -> BTreeMap<String, u32> {
+        let parent_of: HashMap<&str, Option<&str>> = self
+            .items
+            .iter()
+            .map(|i| (i.id.as_str(), i.parent.as_deref()))
+            .collect();
+        let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+        for item in &self.items {
+            if item.kind != ItemKind::Manga {
+                continue;
+            }
+            // 已访问集合：手工编辑索引可能造成环形父子关系，
+            // 它保证每部漫画的父链最多被走一遍（正确性 + 终止性）
+            let mut visited: HashSet<&str> = HashSet::new();
+            let mut cur = item.parent.as_deref();
+            while let Some(pid) = cur {
+                if !visited.insert(pid) {
+                    break;
+                }
+                *counts.entry(pid.to_string()).or_insert(0) += 1;
+                cur = parent_of.get(pid).copied().flatten();
+            }
+        }
+        counts
     }
 
     /// 把条目从原容器顺序中移除（不删除条目本身）
@@ -509,6 +539,42 @@ mod tests {
         idx.set_order(None, vec!["m1".into(), "不存在".into()]).unwrap();
         let ids: Vec<String> = idx.children(None).iter().map(|i| i.id.clone()).collect();
         assert_eq!(ids, vec!["m1", "m3", "m2"]);
+    }
+
+    #[test]
+    fn manga_counts_recurse_and_skip_empty_folders() {
+        let mut idx = LibraryIndex::default();
+        // f1(空) / f2 -> m1, f3 -> m2 / m3, m4 在根目录
+        idx.items.push(folder("f1", None));
+        idx.items.push(folder("f2", None));
+        idx.items.push(folder("f3", Some("f2")));
+        idx.items.push(manga("m1", Some("f2")));
+        idx.items.push(manga("m2", Some("f3")));
+        idx.items.push(manga("m3", None));
+        idx.items.push(manga("m4", None));
+
+        let counts = idx.manga_counts();
+        assert_eq!(counts.get("f1"), None); // 空文件夹不出现在表里
+        assert_eq!(counts.get("f2"), Some(&2)); // 自身 1 部 + 子文件夹 1 部
+        assert_eq!(counts.get("f3"), Some(&1));
+        assert_eq!(counts.len(), 2); // 根目录的漫画不归属任何文件夹
+    }
+
+    #[test]
+    fn manga_counts_survives_cyclic_parents() {
+        // 手工编辑索引可能造出环形父子关系，统计必须能终止
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga("m1", Some("f1")));
+        let mut f1 = folder("f1", Some("f2"));
+        let mut f2 = folder("f2", Some("f1"));
+        f1.kind = ItemKind::Folder;
+        f2.kind = ItemKind::Folder;
+        idx.items.push(f1);
+        idx.items.push(f2);
+
+        let counts = idx.manga_counts();
+        assert_eq!(counts.get("f1"), Some(&1));
+        assert_eq!(counts.get("f2"), Some(&1));
     }
 
     #[test]

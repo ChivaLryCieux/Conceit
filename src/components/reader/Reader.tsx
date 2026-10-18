@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { fetchPages, saveProgress } from "../api";
-import { MinusIcon, PlusIcon } from "./icons";
-import type { Item } from "../types";
-import type { Toast } from "../App";
+import { fetchPages, saveProgress } from "../../api";
+import ReaderTopbar from "./ReaderTopbar";
+import type { Item, Toast } from "../../types";
 
 interface Props {
   item: Item;
@@ -170,62 +169,21 @@ export default function Reader({ item, onExit, onToast }: Props) {
 
   return (
     <div className="reader" ref={rootRef}>
-      <div
-        className={`reader-topbar${chromeVisible ? "" : " chrome-hidden"}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button type="button" className="btn" onClick={onExit}>
-          ← 退出阅读
-        </button>
-        <span className="reader-title">{item.title}</span>
-
-        <div className="reader-zoom" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="btn btn-icon"
-            title="缩小"
-            aria-label="缩小"
-            disabled={zoom <= ZOOM_MIN}
-            onClick={() => setZoom((z) => clampZoom(z - 0.1))}
-          >
-            <MinusIcon />
-          </button>
-          <button
-            type="button"
-            className="reader-zoom-value"
-            title="恢复适应宽度"
-            onClick={() => setZoom(1)}
-          >
-            {Math.round(zoom * 100)}%
-          </button>
-          <button
-            type="button"
-            className="btn btn-icon"
-            title="放大"
-            aria-label="放大"
-            disabled={zoom >= ZOOM_MAX}
-            onClick={() => setZoom((z) => clampZoom(z + 0.1))}
-          >
-            <PlusIcon />
-          </button>
-        </div>
-
-        <input
-          className="reader-slider"
-          type="range"
-          min={0}
-          max={1000}
-          value={Math.round(fraction * 1000)}
-          onChange={(e) => jumpTo(Number(e.target.value) / 1000)}
-          onClick={(e) => e.stopPropagation()}
-          aria-label="阅读进度"
-        />
-        <span className="reader-counter">
-          {pages.length > 0
-            ? `${current} / ${pages.length} · ${Math.round(fraction * 100)}%`
-            : "—"}
-        </span>
-      </div>
+      <ReaderTopbar
+        title={item.title}
+        zoom={zoom}
+        zoomAtMin={zoom <= ZOOM_MIN}
+        zoomAtMax={zoom >= ZOOM_MAX}
+        onZoomIn={() => setZoom((z) => clampZoom(z + 0.1))}
+        onZoomOut={() => setZoom((z) => clampZoom(z - 0.1))}
+        onZoomReset={() => setZoom(1)}
+        fraction={fraction}
+        current={current}
+        total={pages.length}
+        chromeVisible={chromeVisible}
+        onSeek={jumpTo}
+        onExit={onExit}
+      />
 
       <div
         className="reader-scroll"

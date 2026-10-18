@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import Shelf from "./components/Shelf";
-import Reader from "./components/Reader";
+import Shelf from "./components/shelf/Shelf";
+import Reader from "./components/reader/Reader";
 import { fetchSnapshot, importSources } from "./api";
-import type { Item, LibrarySnapshot } from "./types";
-
-export interface Toast {
-  id: number;
-  text: string;
-  tone: "info" | "error" | "success";
-}
+import type { Item, LibrarySnapshot, Toast } from "./types";
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);

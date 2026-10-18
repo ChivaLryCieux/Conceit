@@ -19,8 +19,10 @@ export interface Item {
   title: string;
   /** 所属文件夹 id；undefined 表示根目录 */
   parent?: string;
-  /** 是否展示封面图；false = 纯色封面（默认） */
-  showCover: boolean;
+  /** 是否展示封面图；false = 纯色封面（默认）。
+   *  注意：Tauri 只把命令「参数」在 camelCase/snake_case 间自动转换，
+   *  响应体键名与 Rust serde 输出一致，因此这里用蛇形。 */
+  show_cover: boolean;
   manga?: MangaMeta;
   added_at: number;
 }
@@ -36,6 +38,15 @@ export interface LibraryIndex {
 export interface LibrarySnapshot {
   root: string;
   index: LibraryIndex;
+  /** 文件夹 id -> 其中（含子文件夹）的漫画数量，由 Rust 预计算 */
+  manga_counts: Record<string, number>;
 }
 
 export const ROOT_KEY = "root";
+
+/** 轻提示 */
+export interface Toast {
+  id: number;
+  text: string;
+  tone: "info" | "error" | "success";
+}

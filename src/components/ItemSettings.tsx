@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import Modal from "./Modal";
+import Modal from "./ui/Modal";
 import { updateItemSettings } from "../api";
 import type { Item } from "../types";
 
@@ -22,7 +22,7 @@ export default function ItemSettings({
   onToast,
 }: Props) {
   const [title, setTitle] = useState(item.title);
-  const [showCover, setShowCover] = useState(item.showCover);
+  const [showCover, setShowCover] = useState(item.show_cover);
   const [cover, setCover] = useState<string | undefined>(item.manga?.cover);
   const [busy, setBusy] = useState(false);
 

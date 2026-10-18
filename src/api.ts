@@ -106,20 +106,3 @@ export function childrenOf(
   }
   return result;
 }
-
-/** 递归统计一个文件夹内的漫画数量 */
-export function countManga(index: LibraryIndex, folderId: string): number {
-  let count = 0;
-  for (const item of index.items) {
-    if (item.kind !== "manga") continue;
-    let cur: string | undefined = item.parent;
-    while (cur) {
-      if (cur === folderId) {
-        count += 1;
-        break;
-      }
-      cur = index.items.find((i) => i.id === cur)?.parent;
-    }
-  }
-  return count;
-}

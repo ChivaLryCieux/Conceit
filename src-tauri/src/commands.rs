@@ -5,6 +5,7 @@ use crate::library::{
     LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
@@ -40,6 +41,8 @@ pub struct Snapshot {
     /// 书库根目录（绝对路径）
     pub root: String,
     pub index: LibraryIndex,
+    /// 文件夹 id -> 其中（含子文件夹）的漫画数量，前端直接查表
+    pub manga_counts: BTreeMap<String, u32>,
 }
 
 fn lock<'a>(
@@ -55,6 +58,7 @@ pub fn library_snapshot(state: State<'_, Mutex<AppState>>) -> Result<Snapshot, S
     Ok(Snapshot {
         root: st.root.to_string_lossy().replace('\\', "/"),
         index: st.index.clone(),
+        manga_counts: st.index.manga_counts(),
     })
 }
 

@@ -1,6 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { GearIcon } from "./icons";
-import type { Item } from "../types";
+import { GearIcon } from "../ui/icons";
+import type { Item } from "../../types";
 
 export type DropMode = "before" | "after" | "into";
 
@@ -51,7 +51,7 @@ export default function Card({
 }: Props) {
   const isFolder = item.kind === "folder";
   const coverPath = item.manga?.cover;
-  const showImage = !isFolder && item.showCover && coverPath != null;
+  const showImage = !isFolder && item.show_cover && coverPath != null;
   const coverUrl = showImage
     ? convertFileSrc(`${root}/${item.manga!.dir}/${coverPath}`)
     : null;

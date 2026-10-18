@@ -40,6 +40,10 @@ pnpm tauri build   # 打包发布版
 先以 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 pnpm tauri dev`
 启动应用，再另开终端执行 `node scripts/verify-reader.cjs`。
 
+**条目设置验证**（可选）：`scripts/verify-cover.cjs` 通过真实点击走一遍
+「打开设置 → 勾选展示封面 → 保存 → 书架渲染封面图 → 重开设置状态仍在」的闭环：
+`node scripts/verify-cover.cjs`（同样需要 `--remote-debugging-port=9222` 的 dev 实例）。
+
 **移动端适配验证**（可选）：`scripts/verify-mobile.cjs` 在同一 CDP 连接上模拟
 小屏手机 / 手机 / 平板三种视口与触摸事件，检查无横向溢出、设置按钮常显、
 长按菜单、长按拖动排序、顶栏两行排布、底部弹窗等，并输出通过情况：
@@ -110,20 +114,29 @@ library/
 ```
 src/                         前端（React 18 + Vite 5 + TypeScript 严格模式）
 ├── App.tsx                  应用状态：书架 / 阅读器切换、文件夹栈、拖拽导入、Toast
-├── api.ts                   对 Rust 命令的封装 + 前端侧排序 / 统计工具
-├── types.ts                 与 Rust 数据模型一一对应的类型
+├── api.ts                   对 Rust 命令的封装 + 书架条目排序
+├── types.ts                 与 Rust 数据模型一一对应的类型（含 Toast）
+├── styles/                  样式，按关注点拆分，由 index.css 统一引入
+│   ├── base.css             变量、重置、应用外壳、按钮、通用动画、滚动条
+│   ├── shelf.css            书架：品牌区、面包屑、卡片网格、条目卡片、右键菜单
+│   ├── reader.css           阅读器：浮层顶栏、缩放控件、进度滑块、滚动区
+│   ├── overlay.css          忙碌遮罩、Toast、模态弹窗、表单、封面选页
+│   └── mobile.css           移动端 / 触屏适配（断点与 hover:none）
 ├── components/
-│   ├── Shelf.tsx            书架：封面网格、导入入口、右键菜单、拖拽排序
-│   ├── Card.tsx             漫画 / 文件夹卡片（封面 / 纯色封面、进度条、设置按钮）
-│   ├── ContextMenu.tsx      轻量右键菜单
-│   ├── Modal.tsx            通用模态弹窗
-│   ├── InputDialog.tsx      单行输入弹窗（新建文件夹等）
+│   ├── shelf/               书架功能域
+│   │   ├── Shelf.tsx        编排：状态、弹窗、网格渲染
+│   │   ├── ShelfHeader.tsx  品牌区 + 面包屑 + 操作按钮
+│   │   ├── Card.tsx         漫画 / 文件夹卡片（封面 / 纯色封面、进度条、设置按钮）
+│   │   ├── useShelfMutations.ts  导入 / 新建 / 删除 / 移动
+│   │   └── useItemSorting.ts     鼠标拖放 + 触屏长按排序（共用落点计算）
+│   ├── reader/              阅读器功能域
+│   │   ├── Reader.tsx       图片加载、进度恢复与保存、缩放、键盘操作
+│   │   └── ReaderTopbar.tsx 唯一顶栏（退出 / 标题 / 缩放 / 进度滑块 / 计数）
 │   ├── ItemSettings.tsx     条目设置（名称 / 封面开关 / 封面页选择）
-│   ├── icons.tsx            内联 SVG 图标
-│   └── Reader.tsx           阅读器：竖向滚动、浮层顶栏（Ctrl+滚轮缩放 / 进度）、进度恢复、键盘操作
+│   └── ui/                  通用组件：Modal、InputDialog、ContextMenu、icons
 
 src-tauri/                   后端（Rust + Tauri 2）
-├── src/library.rs           书库模型：索引持久化、自然排序、目录复制、zip 解压
+├── src/library.rs           书库模型：索引持久化、自然排序、目录复制、zip 解压、漫画数量统计
 ├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入）
 └── tauri.conf.json          桌面配置（asset 协议加载本地图片）
 ```
