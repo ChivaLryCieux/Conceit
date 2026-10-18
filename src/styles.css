@@ -447,6 +447,29 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.reader-bottombar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: rgba(20, 21, 26, 0.94);
+  border-top: 1px solid var(--border);
+  z-index: 2;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.reader-bottombar.chrome-hidden {
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
+}
+
+.reader-slider {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .reader-scroll {
   flex: 1;
   min-height: 0;
