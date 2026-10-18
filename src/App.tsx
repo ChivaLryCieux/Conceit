@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Shelf from "./components/Shelf";
 import Reader from "./components/Reader";
 import { fetchSnapshot, importSources } from "./api";
@@ -51,8 +53,6 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
-        const { invoke } = await import("@tauri-apps/api/core");
         const stop = await getCurrentWebview().onDragDropEvent(async (event) => {
           if (cancelled) return;
           const payload = event.payload as { type: string; paths?: string[] };
