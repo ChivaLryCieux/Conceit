@@ -1,31 +1,49 @@
-# Dependencies
+# ---- 依赖 ----
 node_modules/
 
-# Build output
+# ---- 构建产物 ----
 dist/
 dist-ssr/
+coverage/
+*.tsbuildinfo
 
-# Rust / Tauri
+# ---- Rust / Tauri（构建产物与生成文件全部位于 target/）----
 target/
 src-tauri/target/
-src-tauri/gen/schemas/
+src-tauri/gen/
 
-# Logs
+# ---- 环境变量（可能含密钥，切勿提交；示例文件除外）----
+.env
+.env.*
+!.env.example
+
+# ---- 日志 ----
 *.log
 npm-debug.log*
 pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Editor / OS
+# ---- 编辑器 / 操作系统 ----
 .vscode/*
 !.vscode/extensions.json
 .idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Tauri build artifacts
-*.msi
-*.exe
-*.nsis
-*.deb
-*.AppImage
-*.dmg
+# ---- 临时 / 备份文件 ----
+*.tmp
+*.temp
+*.bak
+*.orig
