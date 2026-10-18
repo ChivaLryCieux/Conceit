@@ -130,6 +130,10 @@ export default function Shelf({
     if (!window.confirm(message)) return;
     try {
       await deleteItems([item.id]);
+      // 如果删掉的正是当前所在文件夹，先退回上一层
+      if (item.id === currentFolder) {
+        onNavigateDepth(Math.max(0, breadcrumbs.length - 2));
+      }
       await onReload();
     } catch (e) {
       onToast(`删除失败：${e}`, "error");

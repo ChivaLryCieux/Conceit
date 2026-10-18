@@ -157,7 +157,7 @@ pub fn move_item(
     }
     st.index.detach(&id);
     st.index.attach(&id, new_parent.as_deref());
-    if let Some(mut it) = st.index.item_mut(&id) {
+    if let Some(it) = st.index.item_mut(&id) {
         it.parent = new_parent;
     }
     st.save()

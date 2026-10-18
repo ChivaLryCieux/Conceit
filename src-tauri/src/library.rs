@@ -148,10 +148,6 @@ impl LibraryIndex {
         result
     }
 
-    pub fn contains(&self, id: &str) -> bool {
-        self.items.iter().any(|i| i.id == id)
-    }
-
     /// 把条目从原容器顺序中移除（不删除条目本身）
     pub fn detach(&mut self, id: &str) {
         for ids in self.order.values_mut() {
