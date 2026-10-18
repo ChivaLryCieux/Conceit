@@ -398,3 +398,173 @@ pub fn now_unix() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("conceit-test-{tag}-{}", now_unix()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn manga(id: &str, parent: Option<&str>) -> Item {
+        Item {
+            id: id.to_string(),
+            kind: ItemKind::Manga,
+            title: format!("漫画 {id}"),
+            parent: parent.map(|s| s.to_string()),
+            manga: Some(MangaMeta {
+                dir: format!("manga/{id}"),
+                cover: Some("001.jpg".to_string()),
+                pages: vec!["001.jpg".to_string()],
+                progress: 0.0,
+            }),
+            added_at: 0,
+        }
+    }
+
+    fn folder(id: &str, parent: Option<&str>) -> Item {
+        Item {
+            id: id.to_string(),
+            kind: ItemKind::Folder,
+            title: format!("文件夹 {id}"),
+            parent: parent.map(|s| s.to_string()),
+            manga: None,
+            added_at: 0,
+        }
+    }
+
+    #[test]
+    fn natural_sort_orders_numbers_correctly() {
+        assert_eq!(natural_cmp("page2.jpg", "page10.jpg"), Ordering::Less);
+        assert_eq!(natural_cmp("page10.jpg", "page2.jpg"), Ordering::Greater);
+        assert_eq!(natural_cmp("a.jpg", "a.jpg"), Ordering::Equal);
+        assert_eq!(natural_cmp("B.jpg", "a.jpg"), Ordering::Greater); // 大小写不敏感
+        assert_eq!(natural_cmp("1-封面.jpg", "10-封面.jpg"), Ordering::Less);
+    }
+
+    #[test]
+    fn scan_images_finds_nested_and_sorts_naturally() {
+        let dir = temp_dir("scan");
+        fs::write(dir.join("page10.jpg"), b"x").unwrap();
+        fs::write(dir.join("page2.png"), b"x").unwrap();
+        fs::write(dir.join("notes.txt"), b"x").unwrap();
+        fs::write(dir.join(".hidden.jpg"), b"x").unwrap();
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub/page3.webp"), b"x").unwrap();
+        fs::create_dir_all(dir.join("__MACOSX")).unwrap();
+        fs::write(dir.join("__MACOSX/._junk.jpg"), b"x").unwrap();
+
+        let pages = scan_images(&dir);
+        assert_eq!(pages, vec!["page2.png", "page10.jpg", "sub/page3.webp"]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn copy_dir_all_copies_nested_and_skips_junk() {
+        let src = temp_dir("copy-src");
+        let dst = temp_dir("copy-dst");
+        fs::create_dir_all(src.join("a/b")).unwrap();
+        fs::write(src.join("a/b/1.jpg"), b"1").unwrap();
+        fs::write(src.join("2.png"), b"2").unwrap();
+        fs::write(src.join(".DS_Store"), b"junk").unwrap();
+
+        let target = dst.join("manga/m1");
+        copy_dir_all(&src, &target).unwrap();
+
+        assert!(target.join("a/b/1.jpg").exists());
+        assert!(target.join("2.png").exists());
+        assert!(!target.join(".DS_Store").exists());
+
+        fs::remove_dir_all(&src).ok();
+        fs::remove_dir_all(&dst).ok();
+    }
+
+    #[test]
+    fn index_children_follow_order_and_fall_back() {
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga("m1", None));
+        idx.items.push(manga("m2", None));
+        idx.items.push(manga("m3", None));
+        idx.attach("m1", None);
+        idx.attach("m2", None);
+
+        let ids: Vec<String> = idx.children(None).iter().map(|i| i.id.clone()).collect();
+        assert_eq!(ids, vec!["m1", "m2", "m3"]); // m3 未排序，兜底追加
+
+        idx.set_order(None, vec!["m3".into(), "m1".into()]).unwrap();
+        let ids: Vec<String> = idx.children(None).iter().map(|i| i.id.clone()).collect();
+        assert_eq!(ids, vec!["m3", "m1", "m2"]); // 遗漏的补在后面
+
+        // 非法 id 被忽略
+        idx.set_order(None, vec!["m1".into(), "不存在".into()]).unwrap();
+        let ids: Vec<String> = idx.children(None).iter().map(|i| i.id.clone()).collect();
+        assert_eq!(ids, vec!["m1", "m3", "m2"]);
+    }
+
+    #[test]
+    fn remove_recursive_clears_folders_and_order() {
+        let mut idx = LibraryIndex::default();
+        idx.items.push(folder("f1", None));
+        idx.items.push(manga("m1", Some("f1")));
+        idx.items.push(folder("f2", Some("f1")));
+        idx.items.push(manga("m2", Some("f2")));
+        idx.items.push(manga("m3", None));
+        idx.attach("f1", None);
+        idx.attach("m1", Some("f1"));
+        idx.attach("f2", Some("f1"));
+        idx.attach("m2", Some("f2"));
+        idx.attach("m3", None);
+
+        let removed = idx.remove_recursive("f1");
+        assert_eq!(removed.len(), 4);
+        assert!(idx.item("f1").is_none());
+        assert!(idx.item("m2").is_none());
+        assert!(idx.item("m3").is_some());
+        assert_eq!(idx.children(None).len(), 1);
+        assert!(idx.order.get("f1").is_none());
+    }
+
+    #[test]
+    fn descendant_check_prevents_cycles() {
+        let mut idx = LibraryIndex::default();
+        idx.items.push(folder("f1", None));
+        idx.items.push(folder("f2", Some("f1")));
+        idx.items.push(manga("m1", Some("f2")));
+
+        assert!(idx.is_descendant_or_self("f1", "f1"));
+        assert!(idx.is_descendant_or_self("f1", "f2"));
+        assert!(idx.is_descendant_or_self("f1", "m1"));
+        assert!(!idx.is_descendant_or_self("f2", "f1"));
+        assert!(!idx.is_descendant_or_self("m1", "f1"));
+    }
+
+    #[test]
+    fn title_from_path_uses_stem() {
+        assert_eq!(title_from_path(&PathBuf::from("D:\\漫画\\海贼王")), "海贼王");
+        assert_eq!(title_from_path(&PathBuf::from("/a/b/one piece.zip")), "one piece");
+    }
+
+    #[test]
+    fn index_roundtrip_through_disk() {
+        let dir = temp_dir("index");
+        let path = dir.join("index.json");
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga("m1", None));
+        idx.attach("m1", None);
+        idx.save(&path).unwrap();
+
+        let loaded = LibraryIndex::load(&path).unwrap();
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.order.get("root").unwrap(), &vec!["m1".to_string()]);
+
+        // 空文件 / 不存在都应得到默认索引
+        fs::write(&path, "").unwrap();
+        assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 0);
+        fs::remove_dir_all(&dir).ok();
+    }
+}
