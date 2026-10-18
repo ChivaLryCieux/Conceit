@@ -20,6 +20,7 @@ pub fn run() {
             app.manage(Mutex::new(state));
             Ok(())
         })
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::library_snapshot,
             commands::create_folder,
@@ -31,6 +32,7 @@ pub fn run() {
             commands::manga_pages,
             commands::manga_cover,
             commands::suggest_title,
+            commands::import_sources,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");

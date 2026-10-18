@@ -1,7 +1,8 @@
 //! Tauri 命令层：书库快照、文件夹、重命名、删除、移动、排序与阅读进度。
 
 use crate::library::{
-    title_from_path, Item, ItemKind, LibraryIndex, MangaMeta, INDEX_FILE_NAME,
+    copy_dir_all, extract_zip, now_unix, scan_images, title_from_path, Item, ItemKind,
+    LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
 use serde::Serialize;
 use std::path::PathBuf;
@@ -239,4 +240,69 @@ pub fn manga_cover(state: State<'_, Mutex<AppState>>, id: String) -> Result<Opti
 #[tauri::command]
 pub fn suggest_title(path: String) -> Result<String, String> {
     Ok(title_from_path(&PathBuf::from(path)))
+}
+
+/// 从本机路径导入漫画：文件夹会递归复制，zip 会解压，均落入 `library/manga/<id>/`。
+/// target_folder 为 None 表示导入到根目录。
+#[tauri::command]
+pub fn import_sources(
+    state: State<'_, Mutex<AppState>>,
+    paths: Vec<String>,
+    target_folder: Option<String>,
+) -> Result<Vec<Item>, String> {
+    let mut st = lock(&state)?;
+    if let Some(p) = &target_folder {
+        match st.index.item(p) {
+            Some(item) if item.kind == ItemKind::Folder => {}
+            _ => return Err("目标文件夹不存在".to_string()),
+        }
+    }
+    let mut imported: Vec<Item> = Vec::new();
+    for path_str in &paths {
+        let src = PathBuf::from(path_str);
+        if !src.exists() {
+            return Err(format!("路径不存在: {path_str}"));
+        }
+        let is_zip = src.is_file()
+            && src
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("zip"))
+                .unwrap_or(false);
+        if !src.is_dir() && !is_zip {
+            return Err(format!("仅支持导入文件夹或 zip 压缩包: {path_str}"));
+        }
+
+        let title = title_from_path(&src);
+        let id = st.index.next_id(ItemKind::Manga);
+        let rel_dir = format!("{MANGA_DIR_NAME}/{id}");
+        let dest = st.root.join(&rel_dir);
+
+        if is_zip {
+            extract_zip(&src, &dest)?;
+        } else {
+            copy_dir_all(&src, &dest)?;
+        }
+
+        let pages = scan_images(&dest);
+        let cover = pages.first().cloned();
+        let item = Item {
+            id: id.clone(),
+            kind: ItemKind::Manga,
+            title,
+            parent: target_folder.clone(),
+            manga: Some(MangaMeta {
+                dir: rel_dir,
+                cover,
+                pages,
+                progress: 0.0,
+            }),
+            added_at: now_unix(),
+        };
+        st.index.items.push(item.clone());
+        st.index.attach(&id, target_folder.as_deref());
+        imported.push(item);
+    }
+    st.save()?;
+    Ok(imported)
 }
