@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@rollup/rollup-freebsd-arm64@4.64.8'
+  - '@rollup/rollup-linux-arm64-gnu@4.64.8'
+  - '@rollup/rollup-openharmony-arm64@4.64.8'

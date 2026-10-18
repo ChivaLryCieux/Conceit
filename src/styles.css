@@ -1,0 +1,60 @@
+:root {
+  color-scheme: dark;
+  --bg: #14151a;
+  --bg-soft: #1c1e26;
+  --bg-card: #22242e;
+  --border: #31343f;
+  --text: #e8e9ee;
+  --text-dim: #9aa0b0;
+  --accent: #7c6cf0;
+  --accent-soft: rgba(124, 108, 240, 0.18);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.5px;
+}
+
+.app-subtitle {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.app-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+}
