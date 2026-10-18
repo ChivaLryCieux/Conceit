@@ -27,6 +27,26 @@ export async function renameItem(id: string, title: string): Promise<void> {
   return invoke("rename_item", { id, title });
 }
 
+export interface ItemSettings {
+  title?: string;
+  showCover?: boolean;
+  /** 选择漫画某一页作为封面（该页的相对路径） */
+  cover?: string;
+}
+
+/** 更新条目设置：名称 / 封面开关 / 封面页 */
+export async function updateItemSettings(
+  id: string,
+  settings: ItemSettings
+): Promise<void> {
+  return invoke("update_item_settings", {
+    id,
+    title: settings.title ?? null,
+    showCover: settings.showCover ?? null,
+    cover: settings.cover ?? null,
+  });
+}
+
 export async function deleteItems(ids: string[]): Promise<void> {
   return invoke("delete_items", { ids });
 }

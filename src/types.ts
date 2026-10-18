@@ -19,6 +19,8 @@ export interface Item {
   title: string;
   /** 所属文件夹 id；undefined 表示根目录 */
   parent?: string;
+  /** 是否展示封面图；false = 纯色封面（默认） */
+  showCover: boolean;
   manga?: MangaMeta;
   added_at: number;
 }

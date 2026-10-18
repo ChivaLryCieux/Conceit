@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { fetchPages, saveProgress } from "../api";
+import { MinusIcon, PlusIcon } from "./icons";
 import type { Item } from "../types";
 import type { Toast } from "../App";
 
@@ -10,7 +11,14 @@ interface Props {
   onToast: (text: string, tone?: Toast["tone"]) => void;
 }
 
-/** 阅读器：竖向拼接图片上下滑动；点击画面显隐浮窗工具栏 */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3;
+
+function clampZoom(z: number): number {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+}
+
+/** 阅读器：竖向拼接图片上下滑动；点击画面显隐唯一顶部框栏 */
 export default function Reader({ item, onExit, onToast }: Props) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,6 +26,8 @@ export default function Reader({ item, onExit, onToast }: Props) {
   const [chromeVisible, setChromeVisible] = useState(true);
   const [current, setCurrent] = useState(1);
   const [fraction, setFraction] = useState(item.manga?.progress ?? 0);
+  /** 缩放比例：1 = 宽度填充整个屏幕 */
+  const [zoom, setZoom] = useState(1);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const fractionRef = useRef(item.manga?.progress ?? 0);
@@ -139,6 +149,8 @@ export default function Reader({ item, onExit, onToast }: Props) {
     el.scrollTo({ top: f * (el.scrollHeight - el.clientHeight) });
   };
 
+  const zoomed = zoom > 1.001;
+
   return (
     <div className="reader">
       <div
@@ -149,8 +161,52 @@ export default function Reader({ item, onExit, onToast }: Props) {
           ← 退出阅读
         </button>
         <span className="reader-title">{item.title}</span>
+
+        <div className="reader-zoom" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="btn btn-icon"
+            title="缩小"
+            aria-label="缩小"
+            disabled={zoom <= ZOOM_MIN}
+            onClick={() => setZoom((z) => clampZoom(z - 0.1))}
+          >
+            <MinusIcon />
+          </button>
+          <button
+            type="button"
+            className="reader-zoom-value"
+            title="恢复适应宽度"
+            onClick={() => setZoom(1)}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            className="btn btn-icon"
+            title="放大"
+            aria-label="放大"
+            disabled={zoom >= ZOOM_MAX}
+            onClick={() => setZoom((z) => clampZoom(z + 0.1))}
+          >
+            <PlusIcon />
+          </button>
+        </div>
+
+        <input
+          className="reader-slider"
+          type="range"
+          min={0}
+          max={1000}
+          value={Math.round(fraction * 1000)}
+          onChange={(e) => jumpTo(Number(e.target.value) / 1000)}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="阅读进度"
+        />
         <span className="reader-counter">
-          {pages.length > 0 ? `${current} / ${pages.length}` : "—"}
+          {pages.length > 0
+            ? `${current} / ${pages.length} · ${Math.round(fraction * 100)}%`
+            : "—"}
         </span>
       </div>
 
@@ -165,13 +221,14 @@ export default function Reader({ item, onExit, onToast }: Props) {
         ) : pages.length === 0 ? (
           <div className="reader-loading">这部漫画还没有图片</div>
         ) : (
-          <div className="reader-track">
+          <div className={`reader-track${zoomed ? " reader-track-zoomed" : ""}`}>
             {pages.map((p, i) => (
               <img
                 key={p}
                 className="reader-page"
                 src={convertFileSrc(p)}
                 alt={`第 ${i + 1} 页`}
+                style={{ width: `${zoom * 100}%` }}
                 draggable={false}
                 onLoad={() => setLoadedCount((c) => c + 1)}
                 onError={() => setLoadedCount((c) => c + 1)}
@@ -181,35 +238,9 @@ export default function Reader({ item, onExit, onToast }: Props) {
         )}
       </div>
 
-      <div
-        className={`reader-bottombar${chromeVisible ? "" : " chrome-hidden"}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <input
-          className="reader-slider"
-          type="range"
-          min={0}
-          max={1000}
-          value={Math.round(fraction * 1000)}
-          onChange={(e) => jumpTo(Number(e.target.value) / 1000)}
-          aria-label="阅读进度"
-        />
-        <span className="reader-counter">{Math.round(fraction * 100)}%</span>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => jumpTo(0)}
-        >
-          回到顶部
-        </button>
-        <button type="button" className="btn btn-primary" onClick={onExit}>
-          退出阅读
-        </button>
-      </div>
-
       {chromeVisible && pages.length > 0 && (
         <div className="reader-hint">
-          点击画面显隐工具栏 · 滚轮/方向键翻页 · Esc 退出
+          点击画面显隐工具栏 · 滚轮 / 方向键翻页 · 框栏内可缩放 · Esc 退出
         </div>
       )}
     </div>

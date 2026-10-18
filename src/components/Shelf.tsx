@@ -1,6 +1,9 @@
 import { useState } from "react";
 import Card, { type DropMode } from "./Card";
 import ContextMenu, { type MenuAction } from "./ContextMenu";
+import InputDialog from "./InputDialog";
+import ItemSettings from "./ItemSettings";
+import { BookLogo } from "./icons";
 import {
   childrenOf,
   countManga,
@@ -8,7 +11,6 @@ import {
   deleteItems,
   moveItem,
   reorder,
-  renameItem,
 } from "../api";
 import type { Item, LibrarySnapshot } from "../types";
 import type { Toast } from "../App";
@@ -52,6 +54,10 @@ export default function Shelf({
   const [over, setOver] = useState<OverState>({ id: null, mode: "before" });
   /** 面包屑上的落点（索引） */
   const [crumbOver, setCrumbOver] = useState<number | null>(null);
+  /** 新建文件夹弹窗 */
+  const [folderDialog, setFolderDialog] = useState(false);
+  /** 条目设置弹窗 */
+  const [settingsItem, setSettingsItem] = useState<Item | null>(null);
 
   function activate(item: Item) {
     if (item.kind === "folder") onEnterFolder(item.id);
@@ -96,30 +102,19 @@ export default function Shelf({
 
   /* ---------- 书架操作 ---------- */
 
-  async function handleNewFolder() {
-    const name = window.prompt("新文件夹名称", "新建文件夹");
-    if (name == null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
+  async function handleCreateFolder(name: string) {
     try {
-      await createFolder(trimmed, currentFolder);
+      await createFolder(name, currentFolder);
+      setFolderDialog(false);
       await onReload();
+      onToast(`已创建文件夹「${name}」`, "success");
     } catch (e) {
       onToast(`创建文件夹失败：${e}`, "error");
     }
   }
 
-  async function handleRename(item: Item) {
-    const name = window.prompt("重命名", item.title);
-    if (name == null) return;
-    const trimmed = name.trim();
-    if (!trimmed || trimmed === item.title) return;
-    try {
-      await renameItem(item.id, trimmed);
-      await onReload();
-    } catch (e) {
-      onToast(`重命名失败：${e}`, "error");
-    }
+  function handleRename(item: Item) {
+    setSettingsItem(item);
   }
 
   async function handleDelete(item: Item) {
@@ -266,7 +261,9 @@ export default function Shelf({
     <div className="shelf">
       <header className="shelf-header">
         <div className="shelf-brand">
-          <span className="brand-mark">📚</span>
+          <span className="brand-mark">
+            <BookLogo />
+          </span>
           <span className="brand-name">幻想阅读器</span>
           <span className="brand-sub">Conceit</span>
         </div>
@@ -307,7 +304,7 @@ export default function Shelf({
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => void handleNewFolder()}
+            onClick={() => setFolderDialog(true)}
           >
             新建文件夹
           </button>
@@ -352,6 +349,7 @@ export default function Shelf({
               }
               dragging={dragId === item.id}
               onActivate={() => activate(item)}
+              onSettings={() => setSettingsItem(item)}
               onContextMenu={(e) =>
                 setMenu({ x: e.clientX, y: e.clientY, item })
               }
@@ -373,6 +371,27 @@ export default function Shelf({
           y={menu.y}
           actions={menuActions(menu.item)}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {folderDialog && (
+        <InputDialog
+          title="新建文件夹"
+          label="文件夹名称"
+          placeholder="例如：本周更新"
+          confirmText="创建"
+          onConfirm={(name) => handleCreateFolder(name)}
+          onClose={() => setFolderDialog(false)}
+        />
+      )}
+
+      {settingsItem && (
+        <ItemSettings
+          item={settingsItem}
+          root={snapshot.root}
+          onClose={() => setSettingsItem(null)}
+          onSaved={() => onReload()}
+          onToast={onToast}
         />
       )}
 
