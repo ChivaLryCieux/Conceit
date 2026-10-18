@@ -27,6 +27,12 @@ pnpm tauri dev     # 开发模式（热更新）
 pnpm tauri build   # 打包发布版
 ```
 
+> **dev 模式说明**：请通过 `pnpm dev` / `pnpm tauri dev` 启动（已内置修复逻辑）。
+> 某些环境下 pnpm store 里的 `esbuild.exe` 被设置了低完整性级别标签（Mandatory
+> Label\Low），会导致 esbuild 服务进程无法写文件、vite 依赖预打包失败、页面白屏。
+> `scripts/dev.mjs` 会自动复制一份干净的 esbuild 并用 `ESBUILD_BINARY_PATH` 指向它，
+> 正常机器上同样无害。直接运行 `vite` 或 `npx vite` 不会经过该修复。
+
 发布产物位于 `src-tauri/target/release/bundle/`（Windows 下为 `conceit.exe`、`.msi` 安装包与 `-setup.exe` 安装程序）。
 
 ## 书库目录结构
