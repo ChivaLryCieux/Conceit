@@ -107,15 +107,20 @@ function buildRust() {
     if (!existsSync(linker)) {
       die(`找不到 NDK 链接器 ${linker}`);
     }
-    execSync(`cargo build --release --lib --target ${t.rust}`, {
-      cwd: SRC_TAURI,
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        NDK_HOME: ndk,
-        [`CARGO_TARGET_${t.rust.toUpperCase().replace(/-/g, "_")}_LINKER`]: linker,
-      },
-    });
+    // custom-protocol 决定 tauri 走「打包进 assets 的自定义协议」还是「devUrl」：
+    // 官方 `tauri android build` 会传这个特性，漏了的话打出来的包会去连开发服务器。
+    execSync(
+      `cargo build --release --lib --target ${t.rust} --features tauri/custom-protocol`,
+      {
+        cwd: SRC_TAURI,
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          NDK_HOME: ndk,
+          [`CARGO_TARGET_${t.rust.toUpperCase().replace(/-/g, "_")}_LINKER`]: linker,
+        },
+      }
+    );
   }
 }
 

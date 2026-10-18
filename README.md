@@ -100,6 +100,12 @@ pnpm tauri ios build
 本仓库改用 `scripts/build-android.mjs` 完成同样的搬运（普通文件复制），再直接调用 Gradle，
 产物与官方流程一致。签名配置也已配好，产出的就是可直接安装的 release APK。
 
+> **两个必须复刻的细节**（脚本已处理，手工跑 cargo 时容易漏）：
+> 1. `cargo build` 必须带 `--features tauri/custom-protocol`。这个特性决定 tauri 走
+>    「内嵌 assets 的自定义协议」还是「devUrl」；漏了的话打出来的包能装上，一打开却提示
+>    连不上 `http://localhost:1420`（`tauri::is_dev()` 实际就是 `!cfg!(feature = "custom-protocol")`）。
+> 2. NDK 的 `libc++_shared.so` 要和 `libconceit_lib.so` 一起放进 jniLibs，否则启动即崩。
+
 **前置环境**（缺失时脚本会明确报错）：
 
 | 变量 | 说明 |
