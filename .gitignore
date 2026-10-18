@@ -10,7 +10,9 @@ coverage/
 # ---- Rust / Tauri（构建产物与生成文件全部位于 target/）----
 target/
 src-tauri/target/
-src-tauri/gen/
+# 仅 gen/schemas 是每次构建重新生成的配置；gen/android、gen/apple 是
+# 需要提交维护的移动端工程，不能忽略
+src-tauri/gen/schemas/
 
 # ---- 环境变量（可能含密钥，切勿提交；示例文件除外）----
 .env

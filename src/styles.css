@@ -112,7 +112,7 @@ button {
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 12px 22px;
+  padding: calc(12px + env(safe-area-inset-top)) 22px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-soft);
   flex-wrap: wrap;
@@ -458,7 +458,7 @@ button {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 16px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
   background: rgba(20, 21, 26, 0.94);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
@@ -536,6 +536,11 @@ button {
   overflow-x: auto;
   cursor: pointer;
   scrollbar-width: thin;
+  /* 触屏：只允许竖向平移（捏合/双击缩放由应用内的 Ctrl+滚轮逻辑接管），
+     并阻止滚动链传递到外壳造成整页回弹 */
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .reader-track {
@@ -570,7 +575,7 @@ button {
 .reader-hint {
   position: fixed;
   left: 50%;
-  bottom: 18px;
+  bottom: calc(18px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   background: rgba(20, 21, 26, 0.9);
   border: 1px solid var(--border);
@@ -615,7 +620,7 @@ button {
 
 .toast-stack {
   position: fixed;
-  bottom: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -905,4 +910,324 @@ button {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ============ 移动端 / 触屏适配 ============ */
+
+/* ---------- 触屏基础 ---------- */
+
+@media (hover: none) {
+  /* 去掉点击蓝绿高亮；应用用自己的 :active 反馈 */
+  body {
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+
+  /* 触屏没有 hover：清除点击后粘滞的悬停效果，改用按压缩放反馈 */
+  .card:hover .card-cover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .card:active .card-cover {
+    transform: scale(0.97);
+  }
+
+  .btn:hover {
+    background: var(--bg-raised);
+    border-color: var(--border);
+  }
+
+  .btn:active {
+    background: #2e323f;
+  }
+
+  .btn-primary:active {
+    background: var(--accent-hover);
+  }
+
+  .page-thumb:hover {
+    transform: none;
+  }
+
+  .crumb:hover {
+    background: none;
+    color: var(--text-dim);
+  }
+
+  .crumb:active {
+    background: var(--accent-soft);
+  }
+
+  .ctx-item:hover {
+    background: none;
+  }
+
+  .ctx-item:active {
+    background: var(--accent-soft);
+  }
+
+  .modal-close:hover {
+    background: none;
+    color: var(--text-dim);
+  }
+
+  .modal-close:active {
+    background: var(--bg-raised);
+    color: var(--text);
+  }
+
+  .reader-zoom-value:hover {
+    border-color: var(--border);
+  }
+
+  .card-settings:hover {
+    background: transparent;
+    color: var(--text-dim);
+  }
+
+  /* 消除按钮点击的 300ms 延迟 */
+  .btn,
+  .crumb,
+  .card,
+  .ctx-item,
+  .page-thumb,
+  .modal-close,
+  .card-settings,
+  .reader-zoom-value,
+  .input {
+    touch-action: manipulation;
+  }
+
+  /* 触屏上设置按钮必须常显（没有 hover 可以悬停） */
+  .card-settings {
+    opacity: 1;
+    width: 30px;
+    height: 30px;
+    margin-right: -6px;
+  }
+
+  /* 右键菜单行高加大，方便手指点选 */
+  .ctx-item {
+    padding: 12px;
+    font-size: 14px;
+  }
+}
+
+/* ---------- 平板（≤1024px） ---------- */
+
+@media (max-width: 1024px) {
+  .shelf-header {
+    gap: 12px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .shelf-grid {
+    gap: 16px 12px;
+    padding: 16px;
+  }
+}
+
+/* ---------- 手机（≤640px） ---------- */
+
+@media (max-width: 640px) {
+  .shelf-header {
+    gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+  }
+
+  /* 第一行：品牌 + 操作；第二行：面包屑（可横向滚动） */
+  .shelf-brand {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .brand-name {
+    font-size: 15px;
+  }
+
+  .crumbs {
+    order: 3;
+    flex-basis: 100%;
+    min-width: 0;
+    padding-bottom: 2px;
+  }
+
+  .shelf-actions {
+    order: 2;
+    flex-basis: 100%;
+  }
+
+  .shelf-actions .btn {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    padding: 11px 6px;
+    font-size: 13px;
+  }
+
+  .shelf-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 14px 10px;
+    padding: 12px;
+  }
+
+  .card-cover-initial {
+    font-size: 34px;
+  }
+
+  .folder-icon {
+    font-size: 36px;
+  }
+
+  .folder-count {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .card-title {
+    font-size: 12px;
+    margin-top: 6px;
+  }
+
+  .card-meta {
+    font-size: 10px;
+  }
+
+  /* 阅读器顶栏：第一行 退出 + 标题 + 缩放，第二行 进度 + 计数 */
+  .reader-topbar {
+    gap: 8px;
+    padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
+  }
+
+  .reader-topbar .btn {
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+
+  .reader-title {
+    font-size: 13px;
+    min-width: 0;
+  }
+
+  .reader-slider {
+    flex-basis: 100%;
+    min-width: 0;
+    height: 26px;
+    margin: 0;
+  }
+
+  .reader-zoom .btn-icon {
+    padding: 9px 10px;
+  }
+
+  .reader-zoom-value {
+    min-width: 46px;
+    padding: 8px 6px;
+  }
+
+  .reader-counter {
+    font-size: 11px;
+  }
+
+  .reader-hint {
+    white-space: normal;
+    text-align: center;
+    max-width: 92vw;
+    line-height: 1.5;
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+
+  /* 模态框改为底部弹出面板，贴合移动端习惯 */
+  .modal-overlay {
+    padding: 0;
+    align-items: end;
+  }
+
+  .modal,
+  .modal-wide {
+    width: 100%;
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .modal-header {
+    padding: 12px 14px;
+  }
+
+  .modal-body {
+    padding: 16px 14px;
+  }
+
+  .modal-footer {
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .modal-footer .btn {
+    flex: 1;
+    padding: 12px;
+    font-size: 14px;
+  }
+
+  .modal-close {
+    width: 36px;
+    height: 36px;
+  }
+
+  .page-picker {
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    max-height: 46vh;
+  }
+
+  .toast {
+    max-width: 86vw;
+  }
+}
+
+/* ---------- 小屏手机（≤380px） ---------- */
+
+@media (max-width: 380px) {
+  .shelf-actions .btn {
+    font-size: 12px;
+    padding: 10px 4px;
+  }
+
+  .shelf-grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 12px 8px;
+    padding: 10px;
+  }
+
+  .reader-topbar {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .reader-topbar .btn {
+    padding: 9px 9px;
+    font-size: 12px;
+  }
+}
+
+/* ---------- 触屏拖拽排序：跟随手指的浮动卡片 ---------- */
+
+.card-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 150;
+  pointer-events: none;
+  opacity: 0.92;
+  filter: drop-shadow(0 16px 32px rgba(0, 0, 0, 0.55));
+  will-change: transform;
+}
+
+.card-drag-ghost .card-cover {
+  transform: scale(1.03);
+  border-color: var(--accent);
 }

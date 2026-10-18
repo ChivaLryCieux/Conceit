@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface MenuAction {
   label: string;
@@ -14,8 +14,15 @@ interface Props {
   onClose: () => void;
 }
 
-/** 轻量右键菜单：点击外部 / Esc / 滚动 / 缩放时关闭 */
+/** 轻量右键/长按菜单：点击外部 / Esc / 滚动 / 缩放时关闭 */
 export default function ContextMenu({ x, y, actions, onClose }: Props) {
+  const ref = useRef<HTMLDivElement>(null);
+  /** 先用估算值定位，挂载后按真实尺寸夹取，避免小屏上溢出屏幕 */
+  const [pos, setPos] = useState(() => ({
+    left: Math.max(8, Math.min(x, window.innerWidth - 190)),
+    top: Math.max(8, Math.min(y, window.innerHeight - actions.length * 36 - 24)),
+  }));
+
   useEffect(() => {
     const close = () => onClose();
     const onKey = (e: KeyboardEvent) => {
@@ -35,15 +42,21 @@ export default function ContextMenu({ x, y, actions, onClose }: Props) {
     };
   }, [onClose]);
 
-  const style: React.CSSProperties = {
-    left: Math.max(8, Math.min(x, window.innerWidth - 190)),
-    top: Math.max(8, Math.min(y, window.innerHeight - actions.length * 36 - 24)),
-  };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({
+      left: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)),
+      top: Math.max(8, Math.min(y, window.innerHeight - r.height - 8)),
+    });
+  }, [x, y]);
 
   return (
     <div
+      ref={ref}
       className="ctx-menu"
-      style={style}
+      style={{ left: pos.left, top: pos.top }}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >

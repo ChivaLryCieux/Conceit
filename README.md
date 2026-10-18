@@ -16,6 +16,7 @@
   - 「导入 zip」：导入压缩包，自动解压
   - **拖拽导入**：把文件夹 / zip 直接拖到应用窗口（导入到当前所在文件夹）
 - **书库管理**：新建文件夹（应用内弹窗）、重命名、删除（文件夹递归删除其中内容）、移动到根目录
+- **移动端适配**：响应式布局（手机 / 平板 / 小屏手机）、安全区适配、触屏手势（长按打开操作菜单、长按拖动排序）、底部弹出式设置面板、Pinch 缩放
 - **纯 SVG 图标**：界面不使用 emoji，全部为内联 SVG 图标
 
 ## 快速开始
@@ -39,7 +40,51 @@ pnpm tauri build   # 打包发布版
 先以 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 pnpm tauri dev`
 启动应用，再另开终端执行 `node scripts/verify-reader.cjs`。
 
+**移动端适配验证**（可选）：`scripts/verify-mobile.cjs` 在同一 CDP 连接上模拟
+小屏手机 / 手机 / 平板三种视口与触摸事件，检查无横向溢出、设置按钮常显、
+长按菜单、长按拖动排序、顶栏两行排布、底部弹窗等，并输出通过情况：
+`node scripts/verify-mobile.cjs`（需 `--remote-debugging-port=9222` 的 dev 实例正在运行）。
+
 发布产物位于 `src-tauri/target/release/bundle/`（Windows 下为 `conceit.exe`、`.msi` 安装包与 `-setup.exe` 安装程序）。
+
+## 移动端适配
+
+界面已按移动端优先做好适配，桌面 / 平板 / 手机共用同一套代码：
+
+| 维度 | 适配内容 |
+| --- | --- |
+| 布局 | 断点 1024 / 640 / 380px；书架卡片网格自动 2–5 列；头部品牌与操作按钮在窄屏分行，面包屑可横向滚动 |
+| 触屏 | 设置按钮常显（桌面为 hover 显现）；去掉 hover 粘滞效果，改用按压缩放反馈；按钮点击目标加大 |
+| 手势 | 长按卡片打开操作菜单（等价于桌面右键）；长按后拖动即可排序，浮动卡片跟随手指，落到文件夹上为移入；捏合 / Ctrl+滚轮缩放漫画 |
+| 阅读器 | 顶部工具栏在窄屏自动两行排布；漫画始终铺满屏幕；工具栏显隐不影响内容位置 |
+| 弹窗 | 手机上模态框变为底部弹出面板，内部滚动，避让 Home 指示条 |
+| 安全区 | `env(safe-area-inset-*)` 已接入头部、工具栏、提示条、Toast 与弹窗，适配刘海 / 小黑条 |
+| 视口 | `viewport-fit=cover` + 禁用页面缩放（缩放由应用内部控制） |
+
+书库路径使用 Tauri 跨平台的 `app_data_dir()`，Android / iOS 上会自动落到应用私有目录，无需改动。
+
+### 发布移动版
+
+图标资源（Android 自适应图标、iOS AppIcon）已随仓库生成在 `src-tauri/icons/android` 与 `src-tauri/icons/ios`。在此基础上：
+
+**Android**（需要 JDK 17+ 与 Android SDK）：
+
+```bash
+pnpm tauri android init      # 首次：生成 src-tauri/gen/android 工程
+pnpm tauri android dev       # 连接到设备/模拟器调试
+pnpm tauri android build     # 产出 APK / AAB
+```
+
+**iOS**（需要 macOS + Xcode，在 Mac 上执行）：
+
+```bash
+pnpm tauri ios init
+pnpm tauri ios dev
+pnpm tauri ios build
+```
+
+> `tauri android init` 会校验 Java 环境（`JAVA_HOME` 或 Android Studio 自带 JBR），缺失时会中断——属预期行为，装好 JDK 后重试即可。
+> 生成的 `gen/android`、`gen/apple` 工程已纳入版本管理（`.gitignore` 只忽略每次构建重新生成的 `gen/schemas/`）。
 
 ## 书库目录结构
 
