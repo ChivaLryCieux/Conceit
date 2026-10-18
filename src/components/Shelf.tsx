@@ -1,5 +1,5 @@
 import { useState } from "react";
-import Card from "./Card";
+import Card, { type DropMode } from "./Card";
 import ContextMenu, { type MenuAction } from "./ContextMenu";
 import {
   childrenOf,
@@ -7,6 +7,7 @@ import {
   createFolder,
   deleteItems,
   moveItem,
+  reorder,
   renameItem,
 } from "../api";
 import type { Item, LibrarySnapshot } from "../types";
@@ -22,6 +23,11 @@ interface Props {
   onReload: () => Promise<void> | void;
   onToast: (text: string, tone?: Toast["tone"]) => void;
   onImport: (paths: string[]) => Promise<Item[]>;
+}
+
+interface OverState {
+  id: string | null;
+  mode: DropMode;
 }
 
 export default function Shelf({
@@ -40,11 +46,19 @@ export default function Shelf({
   const [menu, setMenu] = useState<{ x: number; y: number; item: Item } | null>(
     null
   );
+  /** 拖拽中的条目 id */
+  const [dragId, setDragId] = useState<string | null>(null);
+  /** 拖放落点指示 */
+  const [over, setOver] = useState<OverState>({ id: null, mode: "before" });
+  /** 面包屑上的落点（索引） */
+  const [crumbOver, setCrumbOver] = useState<number | null>(null);
 
   function activate(item: Item) {
     if (item.kind === "folder") onEnterFolder(item.id);
     else onOpenManga(item);
   }
+
+  /* ---------- 导入 ---------- */
 
   async function pickAndImport(kind: "dir" | "zip") {
     try {
@@ -79,6 +93,8 @@ export default function Shelf({
       onToast(`打开选择对话框失败：${e}`, "error");
     }
   }
+
+  /* ---------- 书架操作 ---------- */
 
   async function handleNewFolder() {
     const name = window.prompt("新文件夹名称", "新建文件夹");
@@ -120,10 +136,9 @@ export default function Shelf({
     }
   }
 
-  async function handleMoveToRoot(item: Item) {
-    if (!item.parent) return;
+  async function handleMoveTo(item: Item, target: string | null) {
     try {
-      await moveItem(item.id, null);
+      await moveItem(item.id, target);
       await onReload();
     } catch (e) {
       onToast(`移动失败：${e}`, "error");
@@ -141,7 +156,7 @@ export default function Shelf({
     if (item.parent) {
       actions.push({
         label: "移动到根目录",
-        onSelect: () => void handleMoveToRoot(item),
+        onSelect: () => void handleMoveTo(item, null),
       });
     }
     actions.push({
@@ -152,6 +167,96 @@ export default function Shelf({
     });
     return actions;
   }
+
+  /* ---------- 拖拽排序 ---------- */
+
+  function onCardDragStart(e: React.DragEvent, item: Item) {
+    setDragId(item.id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", item.id);
+  }
+
+  function onCardDragEnd() {
+    setDragId(null);
+    setOver({ id: null, mode: "before" });
+  }
+
+  /** 根据鼠标位置计算落点：文件夹=进入，漫画=前/后，空白=末尾，自己=原位 */
+  function computeOver(e: React.DragEvent): OverState {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-card-id]");
+    if (!el) return { id: null, mode: "before" };
+    const id = el.dataset.cardId ?? null;
+    if (!id) return { id: null, mode: "before" };
+    if (id === dragId) return { id, mode: "before" };
+    const item = snapshot.index.items.find((i) => i.id === id);
+    if (item?.kind === "folder") return { id, mode: "into" };
+    const rect = el.getBoundingClientRect();
+    const before = e.clientX < rect.left + rect.width / 2;
+    return { id, mode: before ? "before" : "after" };
+  }
+
+  function onGridDragOver(e: React.DragEvent) {
+    if (!dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setCrumbOver(null);
+    const next = computeOver(e);
+    if (next.id === dragId) return; // 悬停在自己身上时保持当前指示
+    setOver(next);
+  }
+
+  async function onGridDrop(e: React.DragEvent) {
+    if (!dragId) return;
+    e.preventDefault();
+    const movingId = dragId;
+    const target = computeOver(e);
+    setDragId(null);
+    setOver({ id: null, mode: "before" });
+    if (target.id === movingId) return;
+
+    try {
+      if (target.mode === "into" && target.id) {
+        await moveItem(movingId, target.id);
+        await onReload();
+        return;
+      }
+      const ids = items.map((i) => i.id).filter((x) => x !== movingId);
+      if (target.id) {
+        const idx = ids.indexOf(target.id);
+        const at = target.mode === "before" ? idx : idx + 1;
+        ids.splice(idx < 0 ? ids.length : at, 0, movingId);
+      } else {
+        ids.push(movingId);
+      }
+      await reorder(currentFolder, ids);
+      await onReload();
+    } catch (err) {
+      onToast(`排序失败：${err}`, "error");
+    }
+  }
+
+  function onCrumbDragOver(e: React.DragEvent, index: number) {
+    if (!dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setOver({ id: null, mode: "before" });
+    setCrumbOver(index);
+  }
+
+  async function onCrumbDrop(e: React.DragEvent, folderId: string | null) {
+    if (!dragId) return;
+    e.preventDefault();
+    const movingId = dragId;
+    setDragId(null);
+    setCrumbOver(null);
+    if (movingId === folderId) return;
+    await handleMoveTo(
+      snapshot.index.items.find((i) => i.id === movingId)!,
+      folderId
+    );
+  }
+
+  /* ---------- 渲染 ---------- */
 
   return (
     <div className="shelf">
@@ -168,8 +273,11 @@ export default function Shelf({
                 type="button"
                 className={`crumb${
                   i === breadcrumbs.length - 1 ? " crumb-current" : ""
-                }`}
+                }${crumbOver === i ? " crumb-droppable" : ""}`}
                 onClick={() => onNavigateDepth(i)}
+                onDragOver={(e) => onCrumbDragOver(e, i)}
+                onDragLeave={() => setCrumbOver(null)}
+                onDrop={(e) => void onCrumbDrop(e, c.id)}
               >
                 {c.title}
               </button>
@@ -204,7 +312,10 @@ export default function Shelf({
       {items.length === 0 ? (
         <div className="shelf-empty">
           <p className="shelf-empty-title">这个书架还空着</p>
-          <p>点击「导入文件夹」选择本机漫画目录，或把文件夹 / zip 直接拖到窗口里</p>
+          <p>
+            点击「导入文件夹」选择本机漫画目录，或把文件夹 / zip
+            直接拖到窗口里
+          </p>
           <button
             type="button"
             className="btn btn-primary"
@@ -214,7 +325,11 @@ export default function Shelf({
           </button>
         </div>
       ) : (
-        <div className="shelf-grid">
+        <div
+          className="shelf-grid"
+          onDragOver={onGridDragOver}
+          onDrop={(e) => void onGridDrop(e)}
+        >
           {items.map((item) => (
             <Card
               key={item.id}
@@ -225,17 +340,25 @@ export default function Shelf({
                   ? countManga(snapshot.index, item.id)
                   : undefined
               }
-              indicator={{ mode: null }}
-              dragging={false}
+              indicator={
+                over.id === item.id && over.id !== dragId
+                  ? { mode: over.mode }
+                  : { mode: null }
+              }
+              dragging={dragId === item.id}
               onActivate={() => activate(item)}
               onContextMenu={(e) =>
                 setMenu({ x: e.clientX, y: e.clientY, item })
               }
-              onDragStart={() => {}}
-              onDragEnd={() => {}}
-              onDrop={() => {}}
+              onDragStart={(e) => onCardDragStart(e, item)}
+              onDragEnd={onCardDragEnd}
+              onDrop={(e) => {
+                e.stopPropagation();
+                onGridDrop(e);
+              }}
             />
           ))}
+          {dragId && over.id === null && <div className="drop-endline" />}
         </div>
       )}
 
