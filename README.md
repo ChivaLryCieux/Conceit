@@ -91,6 +91,65 @@ pnpm tauri ios build
 > `tauri android init` 会校验 Java 环境（`JAVA_HOME` 或 Android Studio 自带 JBR），缺失时会中断——属预期行为，装好 JDK 后重试即可。
 > 生成的 `gen/android`、`gen/apple` 工程已纳入版本管理（`.gitignore` 只忽略每次构建重新生成的 `gen/schemas/`）。
 
+### 打包 Android APK（Windows 免管理员）
+
+`pnpm tauri android build` 在 Windows 上有一个坎：它要把 Rust 编出的 `.so` 软链到
+`gen/android/app/src/main/jniLibs/`，而创建符号链接需要「开发者模式」或管理员权限。
+没有这些权限时命令会在 Rust 编译成功之后、链接那一步中断。
+
+本仓库改用 `scripts/build-android.mjs` 完成同样的搬运（普通文件复制），再直接调用 Gradle，
+产物与官方流程一致。签名配置也已配好，产出的就是可直接安装的 release APK。
+
+**前置环境**（缺失时脚本会明确报错）：
+
+| 变量 | 说明 |
+|---|---|
+| `JAVA_HOME` | JDK 17+ |
+| `ANDROID_HOME` | Android SDK（需含 `platforms;android-37`、`build-tools`） |
+| `ANDROID_NDK_HOME` | Android NDK（脚本会从里面取 `clang.cmd` 链接器和 `libc++_shared.so`） |
+
+Rust 交叉编译目标只需装一次：
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi
+```
+
+**打包**：
+
+```bash
+node scripts/build-android.mjs              # 完整流程：前端 -> Rust -> 资源 -> APK
+node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
+```
+
+产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`
+（arm64-v8a + armeabi-v7a 通用包，约 13 MB，minSdk 24 / Android 7.0+）。
+
+> Gradle 首次运行需要下载 Gradle 发行版与 AGP 等依赖；国内网络下 `services.gradle.org`
+> 可能很慢，可先从镜像下载 `gradle-9.6.1-bin.zip` 解压到本地，脚本会优先使用本地安装。
+
+**签名**：release 签名配置在 `gen/android/app/build.gradle.kts`，密钥信息从
+`gen/android/keystore.properties` 读取（该文件含密码，已在 `.gitignore` 中忽略）。
+首次配置：
+
+```bash
+keytool -genkeypair -v -keystore <密钥路径>/conceit-upload.jks -alias conceit \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -storepass <密码> -keypass <密码> -dname "CN=Conceit, OU=Conceit, O=Conceit, C=CN"
+
+# gen/android/keystore.properties（路径用正斜杠，Java 的 properties 会把 \ 当转义符）
+storeFile=<密钥路径>/conceit-upload.jks
+storePassword=<密码>
+keyAlias=conceit
+keyPassword=<密码>
+```
+
+> **请妥善保管密钥文件与密码**：以后每次更新安装到同一台手机，都必须用同一个密钥签名，
+> 否则会被当成另一个应用而无法覆盖安装。密钥丢失且未上架应用商店时，只能卸载重装。
+> 密钥与密码不要提交到 git。
+
+**安装到手机**：开启「设置 → 安全 → 安装未知应用」，把 APK 传到手机点击即可；
+或用数据线执行 `adb install -r Conceit-0.1.0-release.apk`。
+
 ## 书库目录结构
 
 书库位于 `<应用数据目录>/library`，Windows 下通常为
@@ -156,7 +215,9 @@ src-tauri/                   后端（Rust + Tauri 2）
 - **封面策略**：默认纯色封面（按条目 id 派生稳定色值），可在设置中开启封面图并任选一页作为封面
 - **进度恢复**：退出或滚动时节流写入 `index.json`，下次打开按比例恢复滚动位置
 - **文件夹即容器**：每个容器（根目录或文件夹）独立维护排序，移动条目只改变父子关系
-- **兼容旧索引**：`show_cover` 等新字段均带 serde 默认值，旧 `index.json` 可直接读取
+- **兼容旧索引**：`show_cover`、`thumb` 等新字段均带 serde 默认值，旧 `index.json` 可直接读取
+- **Android 打包**：`tauri android build` 在 Windows 上受符号链接权限所限，改用
+  `scripts/build-android.mjs`（文件复制 + 直接调 Gradle），签名走 `keystore.properties`
 
 ## 已知限制
 
@@ -164,6 +225,8 @@ src-tauri/                   后端（Rust + Tauri 2）
 - 条目设置里的「选页封面」网格同样加载原图（带 `loading="lazy"`），页数很多时偏重；
   后续可改为生成每页的小图
 - 缩略图只覆盖 jpg / png / webp / gif / bmp；avif 等格式暂不生成（书架回退显示原图封面）
+- APK 目前只打包 arm64-v8a 与 armeabi-v7a 两个 ABI（覆盖真实手机设备）；
+  模拟器用的 x86 / x86_64 未包含，需要时在 `scripts/build-android.mjs` 的 `TARGETS` 里补
 
 ## 命名
 

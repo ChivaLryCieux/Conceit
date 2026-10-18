@@ -13,6 +13,10 @@ src-tauri/target/
 # 仅 gen/schemas 是每次构建重新生成的配置；gen/android、gen/apple 是
 # 需要提交维护的移动端工程，不能忽略
 src-tauri/gen/schemas/
+# Android 签名配置：含密钥路径与密码，切勿提交（密钥本身在仓库外的 ~/.conceit/）
+src-tauri/gen/android/keystore.properties
+src-tauri/gen/android/local.properties
+src-tauri/gen/android/app/tauri.properties
 
 # ---- 环境变量（可能含密钥，切勿提交；示例文件除外）----
 .env
