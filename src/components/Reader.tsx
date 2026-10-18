@@ -228,7 +228,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
       </div>
 
       <div
-        className={`reader-scroll${chromeVisible ? "" : " chrome-hidden"}`}
+        className="reader-scroll"
         ref={scrollRef}
         onScroll={handleScroll}
         onClick={() => setChromeVisible((v) => !v)}

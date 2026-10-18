@@ -543,12 +543,8 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding: 14px 0 55vh;
-}
-
-/* 工具栏隐藏时漫画完全铺满竖直方向，顶部不留空隙 */
-.reader-scroll.chrome-hidden .reader-track {
-  padding-top: 0;
+  /* 顶部内边距恒定：工具栏显隐是纯浮层效果，绝不能推动漫画内容 */
+  padding: 0 0 55vh;
 }
 
 .reader-track-zoomed {

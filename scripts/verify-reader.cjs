@@ -158,6 +158,9 @@ async function main() {
   /* ---------- 点击显隐 ---------- */
   const cx = await evalJs(`window.innerWidth / 2`);
   const cy = await evalJs(`window.innerHeight * 0.65`);
+  const topBefore = await evalJs(
+    `document.querySelector('.reader-page').getBoundingClientRect().top`
+  );
   await click(cx, cy); // 隐藏
   await sleep(400);
   const hidden = await evalJs(`(() => {
@@ -169,6 +172,7 @@ async function main() {
       trackPaddingTop: getComputedStyle(track).paddingTop,
       scrollHeight: document.querySelector('.reader-scroll').getBoundingClientRect().height,
       winHeight: window.innerHeight,
+      pageTop: document.querySelector('.reader-page').getBoundingClientRect().top,
     };
   })()`);
   check("再次点击画面隐藏工具栏", hidden.hasClass, `opacity=${hidden.opacity}`);
@@ -182,18 +186,29 @@ async function main() {
     Math.abs(hidden.scrollHeight - hidden.winHeight) < 1,
     `scroll=${hidden.scrollHeight}`
   );
+  check(
+    "隐藏工具栏不移动漫画内容",
+    Math.abs(hidden.pageTop - topBefore) < 0.5,
+    `pageTop ${topBefore} -> ${hidden.pageTop}`
+  );
 
   await click(cx, cy); // 显示
   await sleep(400);
   const shown = await evalJs(`(() => ({
     hasClass: document.querySelector('.reader-topbar').classList.contains('chrome-hidden'),
     trackPaddingTop: getComputedStyle(document.querySelector('.reader-track')).paddingTop,
+    pageTop: document.querySelector('.reader-page').getBoundingClientRect().top,
   }))()`);
   check("第三次点击恢复工具栏", !shown.hasClass);
   check(
-    "恢复后顶部留出工具栏空间",
-    shown.trackPaddingTop === "14px",
+    "顶部内边距恒定（不随显隐变化）",
+    shown.trackPaddingTop === "0px",
     `padding-top=${shown.trackPaddingTop}`
+  );
+  check(
+    "显示工具栏不移动漫画内容",
+    Math.abs(shown.pageTop - topBefore) < 0.5,
+    `pageTop ${topBefore} -> ${shown.pageTop}`
   );
 
   /* ---------- Ctrl + 滚轮缩放 ---------- */
