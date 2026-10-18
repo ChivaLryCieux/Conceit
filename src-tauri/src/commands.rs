@@ -82,6 +82,7 @@ pub fn create_folder(
         kind: ItemKind::Folder,
         title,
         parent: parent.clone(),
+        show_cover: false,
         manga: None,
         added_at: crate::library::now_unix(),
     };
@@ -242,6 +243,42 @@ pub fn suggest_title(path: String) -> Result<String, String> {
     Ok(title_from_path(&PathBuf::from(path)))
 }
 
+/// 更新条目设置：名称 / 是否展示封面 / 选择某一页作为封面
+#[tauri::command]
+pub fn update_item_settings(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    title: Option<String>,
+    show_cover: Option<bool>,
+    cover: Option<String>,
+) -> Result<(), String> {
+    let mut st = lock(&state)?;
+    let item = st
+        .index
+        .item_mut(&id)
+        .ok_or_else(|| "条目不存在".to_string())?;
+    if let Some(t) = title {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            item.title = t;
+        }
+    }
+    if let Some(sc) = show_cover {
+        item.show_cover = sc;
+    }
+    if let Some(c) = cover {
+        let meta = item
+            .manga
+            .as_mut()
+            .ok_or_else(|| "该条目不是漫画，无法设置封面".to_string())?;
+        if !meta.pages.iter().any(|p| p == &c) {
+            return Err("封面必须是该漫画的某一页".to_string());
+        }
+        meta.cover = Some(c);
+    }
+    st.save()
+}
+
 /// 从本机路径导入漫画：文件夹会递归复制，zip 会解压，均落入 `library/manga/<id>/`。
 /// target_folder 为 None 表示导入到根目录。
 #[tauri::command]
@@ -291,6 +328,7 @@ pub fn import_sources(
             kind: ItemKind::Manga,
             title,
             parent: target_folder.clone(),
+            show_cover: false,
             manga: Some(MangaMeta {
                 dir: rel_dir,
                 cover,

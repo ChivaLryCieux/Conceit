@@ -48,6 +48,9 @@ pub struct Item {
     /// 所属文件夹 id；None 表示位于根目录
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// 是否展示封面图；false 时使用纯色封面（默认）
+    #[serde(default)]
+    pub show_cover: bool,
     /// kind == Manga 时存在
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manga: Option<MangaMeta>,
@@ -416,6 +419,7 @@ mod tests {
             kind: ItemKind::Manga,
             title: format!("漫画 {id}"),
             parent: parent.map(|s| s.to_string()),
+            show_cover: false,
             manga: Some(MangaMeta {
                 dir: format!("manga/{id}"),
                 cover: Some("001.jpg".to_string()),
@@ -432,6 +436,7 @@ mod tests {
             kind: ItemKind::Folder,
             title: format!("文件夹 {id}"),
             parent: parent.map(|s| s.to_string()),
+            show_cover: false,
             manga: None,
             added_at: 0,
         }

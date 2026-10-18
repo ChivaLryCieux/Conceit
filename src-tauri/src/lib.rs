@@ -33,6 +33,7 @@ pub fn run() {
             commands::manga_cover,
             commands::suggest_title,
             commands::import_sources,
+            commands::update_item_settings,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");
