@@ -170,9 +170,11 @@ function copyDir(src, dest) {
   }
 }
 
-/** 把 src-tauri/android/ 下的应用自有 Kotlin 源码同步进 gen/android。
- *  gen/android 由 tauri 生成，`tauri android init` 重建时这些文件不会自动出现，
- *  仓库里同时保留了一份工作副本；此步骤保证两者一致、init 后可自愈。 */
+/** 把 src-tauri/android/ 下的 Kotlin 源码同步进 gen/android。
+ *  ConceitPlugin.kt 是 tauri 不会生成的应用自有文件；MainActivity.kt 虽由
+ *  `tauri android init` 生成，但我们改写了它（拦截系统返回转交前端），
+ *  必须以 src-tauri/android/ 的规范副本为准。此步骤保证两者一致，
+ *  init 重建工程后也可自愈。 */
 function syncAndroidSources() {
   if (!existsSync(ANDROID_KT_SRC)) return;
   const destDir = path.join(APP_JAVA, "com", "conceit", "mangareader");
