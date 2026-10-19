@@ -219,6 +219,16 @@ pub fn manga_pages(state: State<'_, Mutex<AppState>>, id: String) -> Result<Vec<
         .collect())
 }
 
+/// 当前平台标识（前端据此在 Android 上切换原生导入流程）
+#[tauri::command]
+pub fn app_platform() -> &'static str {
+    if cfg!(target_os = "android") {
+        "android"
+    } else {
+        "desktop"
+    }
+}
+
 /// 由路径推断标题（供导入时使用，前端可直接用）
 #[tauri::command]
 pub fn suggest_title(path: String) -> Result<String, String> {

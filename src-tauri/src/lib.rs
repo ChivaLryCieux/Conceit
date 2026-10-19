@@ -2,6 +2,7 @@
 
 mod commands;
 mod library;
+mod mobile_import;
 
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
@@ -35,6 +36,8 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
+        // Android 导入桥（SAF 目录 / zip 选择）；桌面端为空插件
+        .plugin(mobile_import::init())
         .invoke_handler(tauri::generate_handler![
             commands::library_snapshot,
             commands::create_folder,
@@ -47,6 +50,10 @@ pub fn run() {
             commands::suggest_title,
             commands::import_sources,
             commands::update_item_settings,
+            commands::app_platform,
+            mobile_import::pick_directory,
+            mobile_import::pick_zip_files,
+            mobile_import::clear_import_cache,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");

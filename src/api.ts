@@ -73,6 +73,35 @@ export async function fetchPages(id: string): Promise<string[]> {
   return invoke<string[]>("manga_pages", { id });
 }
 
+/* ---------- Android 导入桥（仅 Android 有意义，桌面端为报错存根） ----------
+ * Android 上 tauri-plugin-dialog 不支持目录选择，文件选择器返回的也是
+ * content:// URI 而非文件系统路径；这些命令由内置 Kotlin 插件
+ * （src-tauri/android/ImportPlugin.kt）返回缓存里的真实路径。 */
+
+/** 打开系统目录选择器，返回缓存中的真实目录路径；取消返回 null */
+export async function pickDirectory(): Promise<string | null> {
+  return invoke<string | null>("pick_directory");
+}
+
+/** 打开系统文件选择器（zip，可多选），返回缓存中的真实文件路径 */
+export async function pickZipFiles(): Promise<string[]> {
+  return invoke<string[]>("pick_zip_files");
+}
+
+/** 清理导入桥复制进缓存的临时文件 */
+export async function clearImportCache(): Promise<void> {
+  return invoke("clear_import_cache");
+}
+
+/** 是否运行在 Android 上（决定导入走原生桥还是插件对话框） */
+export async function isAndroid(): Promise<boolean> {
+  try {
+    return (await invoke<string>("app_platform")) === "android";
+  } catch {
+    return false;
+  }
+}
+
 /** 某个容器（root 或文件夹）下按排序排列的条目 */
 export function childrenOf(
   index: LibraryIndex,

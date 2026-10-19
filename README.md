@@ -15,6 +15,7 @@
   - 「导入文件夹」：选择一个或多个本机漫画目录，递归复制其中所有图片
   - 「导入 zip」：导入压缩包，自动解压
   - **拖拽导入**：把文件夹 / zip 直接拖到应用窗口（导入到当前所在文件夹）
+  - Android 上改用系统文档选择器（SAF）完成目录 / zip 选择，见下文「Android 导入桥」
 - **书库管理**：新建文件夹（应用内弹窗）、重命名、删除（文件夹递归删除其中内容）、移动到根目录
 - **封面缩略图**：书架封面使用导入时预生成的 480px 缩略图（原图动辄数 MB，避免 WebView 为一个小卡片解码整张大图）；阅读仍加载原图
 - **移动端适配**：响应式布局（手机 / 平板 / 小屏手机）、安全区适配、触屏手势（长按打开操作菜单、长按拖动排序）、底部弹出式设置面板、Pinch 缩放
@@ -127,6 +128,10 @@ node scripts/build-android.mjs              # 完整流程：前端 -> Rust -> �
 node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
 ```
 
+脚本在调用 Gradle 前会把 `src-tauri/android/*.kt`（应用自有的 Kotlin 源码，
+目前为导入桥 `ImportPlugin.kt`）同步进 `gen/android/app/src/main/java/`，
+因此执行过 `tauri android init` 重建工程后也无需手动拷贝。
+
 产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`
 （arm64-v8a + armeabi-v7a 通用包，约 13 MB，minSdk 24 / Android 7.0+）。
 
@@ -210,8 +215,31 @@ src/                         前端（React 18 + Vite 5 + TypeScript 严格模�
 src-tauri/                   后端（Rust + Tauri 2）
 ├── src/library.rs           书库模型：索引持久化、自然排序、目录复制、zip 解压、漫画数量统计、封面缩略图生成
 ├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入）
+├── src/mobile_import.rs     Android 导入桥（SAF 目录 / zip 选择，桌面端为存根）
+├── android/ImportPlugin.kt  Android 导入桥的 Kotlin 实现（构建时同步进 gen/android）
 └── tauri.conf.json          桌面配置（asset 协议加载本地图片）
 ```
+
+### Android 导入桥
+
+Android 上 `tauri-plugin-dialog` 有两个硬伤，直接用会报错：
+
+1. **没有目录选择器**——JS 传 `directory: true` 时插件 Rust 端直接返回
+   `FolderPickerNotImplemented`，前端表现为「打开选择对话框失败」；
+2. **文件选择器返回的不是路径**——Android 端返回 `content://` URI 字符串，
+   `std::fs` 无法读取，前端表现为「路径不存在: content://…」。
+
+为此应用内置了一个 Kotlin 插件（`src-tauri/android/ImportPlugin.kt`），用系统文档选择器
+（SAF，`ACTION_OPEN_DOCUMENT_TREE` / `ACTION_GET_CONTENT`）完成
+「选择 → 复制到应用缓存目录 → 返回真实路径」，Rust 侧之后按普通文件夹 / zip 处理。
+复制时保留原始名称，导入后的漫画标题仍然是有意义的文件夹名 / 压缩包名；
+整棵目录树的复制放在后台线程执行，避免主线程 ANR。前端通过 `app_platform` 命令
+区分平台：桌面走插件对话框，Android 走原生桥。
+
+> Kotlin 源码的规范副本在 `src-tauri/android/`，`scripts/build-android.mjs` 每次构建前
+> 会把它同步进 `gen/android/app/src/main/java/com/conceit/mangareader/`
+> （`tauri android init` 重建 gen/android 后无需手动拷贝）。仓库里同时保留了工作副本，
+> 直接用官方 `tauri android build` 也能编到。
 
 ### 实现要点
 
@@ -222,6 +250,8 @@ src-tauri/                   后端（Rust + Tauri 2）
 - **进度恢复**：退出或滚动时节流写入 `index.json`，下次打开按比例恢复滚动位置
 - **文件夹即容器**：每个容器（根目录或文件夹）独立维护排序，移动条目只改变父子关系
 - **兼容旧索引**：`show_cover`、`thumb` 等新字段均带 serde 默认值，旧 `index.json` 可直接读取
+- **Android 导入桥**：插件对话框在 Android 上既不能选目录、也只返回 `content://` URI，
+  由内置 Kotlin 插件经 SAF 拿到缓存里的真实路径后再走同一套导入逻辑（详见上文）
 - **Android 打包**：`tauri android build` 在 Windows 上受符号链接权限所限，改用
   `scripts/build-android.mjs`（文件复制 + 直接调 Gradle），签名走 `keystore.properties`
 
@@ -231,6 +261,8 @@ src-tauri/                   后端（Rust + Tauri 2）
 - 条目设置里的「选页封面」网格同样加载原图（带 `loading="lazy"`），页数很多时偏重；
   后续可改为生成每页的小图
 - 缩略图只覆盖 jpg / png / webp / gif / bmp；avif 等格式暂不生成（书架回退显示原图封面）
+- Android 导入会先把所选文件复制进应用缓存目录、再复制进书库（SAF 的限制，无法直接读源路径），
+  大漫画的导入耗时与临时占用略高；导入完成后会自动清理缓存
 - APK 目前只打包 arm64-v8a 与 armeabi-v7a 两个 ABI（覆盖真实手机设备）；
   模拟器用的 x86 / x86_64 未包含，需要时在 `scripts/build-android.mjs` 的 `TARGETS` 里补
 

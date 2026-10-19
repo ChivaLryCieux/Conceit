@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { createFolder, deleteItems, moveItem } from "../../api";
+import {
+  clearImportCache,
+  createFolder,
+  deleteItems,
+  isAndroid,
+  moveItem,
+  pickDirectory,
+  pickZipFiles,
+} from "../../api";
 import type { Item, Toast } from "../../types";
 
 export interface Crumb {
@@ -32,22 +40,38 @@ export function useShelfMutations({
 
   /** 通过系统对话框选择目录或 zip，导入到当前目录 */
   async function pickAndImport(kind: "dir" | "zip") {
+    const android = await isAndroid();
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected =
-        kind === "dir"
-          ? await open({
-              multiple: true,
-              directory: true,
-              title: "选择要导入的漫画文件夹（可多选）",
-            })
-          : await open({
-              multiple: true,
-              title: "选择 zip 漫画压缩包",
-              filters: [{ name: "漫画压缩包", extensions: ["zip"] }],
-            });
-      if (!selected) return;
-      const paths = Array.isArray(selected) ? selected : [selected];
+      let paths: string[];
+      if (android) {
+        // Android：插件对话框不支持选目录，文件选择器返回的也是 content:// URI，
+        // std::fs 用不了——走内置原生桥，直接拿到缓存里的真实路径
+        // （见 src-tauri/src/mobile_import.rs 与 src-tauri/android/ImportPlugin.kt）
+        if (kind === "dir") {
+          const dir = await pickDirectory();
+          if (!dir) return; // 用户取消
+          paths = [dir];
+        } else {
+          paths = await pickZipFiles();
+          if (paths.length === 0) return; // 用户取消
+        }
+      } else {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const selected =
+          kind === "dir"
+            ? await open({
+                multiple: true,
+                directory: true,
+                title: "选择要导入的漫画文件夹（可多选）",
+              })
+            : await open({
+                multiple: true,
+                title: "选择 zip 漫画压缩包",
+                filters: [{ name: "漫画压缩包", extensions: ["zip"] }],
+              });
+        if (!selected) return;
+        paths = Array.isArray(selected) ? selected : [selected];
+      }
       setBusy(`正在导入 ${paths.length} 个项目…`);
       try {
         const imported = await onImport(paths);
@@ -59,6 +83,10 @@ export function useShelfMutations({
         onToast(`导入失败：${e}`, "error");
       } finally {
         setBusy(null);
+        if (android) {
+          // 书库已有自己的副本，清掉 Kotlin 侧复制进缓存的临时文件
+          await clearImportCache().catch(() => {});
+        }
       }
     } catch (e) {
       onToast(`打开选择对话框失败：${e}`, "error");

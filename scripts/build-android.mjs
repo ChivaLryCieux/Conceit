@@ -38,6 +38,9 @@ const GEN_ANDROID = path.join(SRC_TAURI, "gen", "android");
 const APP_DIR = path.join(GEN_ANDROID, "app");
 const JNI_LIBS = path.join(APP_DIR, "src", "main", "jniLibs");
 const ASSETS = path.join(APP_DIR, "src", "main", "assets");
+const APP_JAVA = path.join(APP_DIR, "src", "main", "java");
+/** 应用自有的 Kotlin 源码（tauri android init 重建 gen/android 时不会生成它们） */
+const ANDROID_KT_SRC = path.join(SRC_TAURI, "android");
 const DIST = path.join(ROOT, "dist");
 
 /** minSdk，决定 NDK 链接器包装脚本的 API 级别 */
@@ -166,6 +169,20 @@ function copyDir(src, dest) {
   }
 }
 
+/** 把 src-tauri/android/ 下的应用自有 Kotlin 源码同步进 gen/android。
+ *  gen/android 由 tauri 生成，`tauri android init` 重建时这些文件不会自动出现，
+ *  仓库里同时保留了一份工作副本；此步骤保证两者一致、init 后可自愈。 */
+function syncAndroidSources() {
+  if (!existsSync(ANDROID_KT_SRC)) return;
+  const destDir = path.join(APP_JAVA, "com", "conceit", "mangareader");
+  for (const entry of readdirSync(ANDROID_KT_SRC)) {
+    if (!entry.endsWith(".kt")) continue;
+    mkdirSync(destDir, { recursive: true });
+    copyFileSync(path.join(ANDROID_KT_SRC, entry), path.join(destDir, entry));
+    log(`已同步应用 Kotlin 源码：${entry}`);
+  }
+}
+
 /** 找一个可用的 Gradle：本地安装优先（wrapper 每次都要下载发行包，国内很慢） */
 function findGradle() {
   const local = "C:\\Users\\LRY\\AndroidTools\\gradle-9.6.1\\bin\\gradle.bat";
@@ -208,6 +225,7 @@ function main() {
   buildRust();
   copyNativeLibs();
   copyAssets();
+  syncAndroidSources();
   runGradle();
   const apk = path.join(
     APP_DIR,
