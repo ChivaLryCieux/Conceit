@@ -18,7 +18,7 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  padding: 10px 16px calc(10px + var(--nav-bar-h));
   background: rgba(20, 21, 26, 0.94);
   border-top: 1px solid var(--border);
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
@@ -137,7 +137,7 @@
 .reader-hint {
   position: fixed;
   left: 50%;
-  top: calc(18px + env(safe-area-inset-top));
+  top: calc(18px + var(--status-bar-h));
   transform: translateX(-50%);
   background: rgba(20, 21, 26, 0.9);
   border: 1px solid var(--border);

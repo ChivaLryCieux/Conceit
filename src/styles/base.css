@@ -12,6 +12,11 @@
   --accent-hover: #8d7ff5;
   --accent-soft: rgba(124, 108, 240, 0.18);
   --danger: #e26d6d;
+  /* 系统栏避让高度：默认取 env()（桌面 / iOS 行为）；
+     安卓上 WebView 的 env(safe-area-inset-*) 在部分设备上返回 0，
+     由 useSystemBarInsets 经原生桥覆写为真实高度 */
+  --status-bar-h: env(safe-area-inset-top);
+  --nav-bar-h: env(safe-area-inset-bottom);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 

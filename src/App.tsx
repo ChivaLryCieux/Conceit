@@ -6,6 +6,7 @@ import Shelf from "./components/shelf/Shelf";
 import Reader from "./components/reader/Reader";
 import { fetchSnapshot, importSources, exitApp } from "./api";
 import { dispatchBack } from "./backHandler";
+import { useSystemBarInsets } from "./useSystemBarInsets";
 import type { Item, LibrarySnapshot, Toast } from "./types";
 
 export default function App() {
@@ -50,6 +51,9 @@ export default function App() {
       unlisten?.();
     };
   }, [reload]);
+
+  // 顶栏 / 底栏 / 弹窗的系统栏避让高度（安卓上覆写 env() 取不到的值）
+  useSystemBarInsets();
 
   const pushToast = useCallback((text: string, tone: Toast["tone"] = "info") => {
     const id = Date.now() + Math.random();

@@ -107,6 +107,12 @@ export async function exitApp(): Promise<void> {
   return invoke("exit_app");
 }
 
+/** 系统栏高度（px，安卓原生桥提供）：top = 状态栏，bottom = 导航栏。
+ *  供顶栏 / 底栏避让使用；桌面端存根报错，由调用方回退 env() */
+export async function systemBarInsets(): Promise<{ top: number; bottom: number }> {
+  return invoke("system_bar_insets");
+}
+
 /** 某个容器（root 或文件夹）下按排序排列的条目 */
 export function childrenOf(
   index: LibraryIndex,
