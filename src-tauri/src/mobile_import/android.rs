@@ -11,6 +11,8 @@ use tauri::{
     Manager, Runtime, State, Wry,
 };
 
+use super::InsetsResponse;
+
 /// Kotlin 插件在 PluginManager 中的注册名（前后端必须一致）
 pub const PLUGIN_NAME: &str = "conceit-android";
 /// Kotlin 类所在的包名（`register_android_plugin` 用它拼 JNI 类路径）
@@ -89,4 +91,27 @@ pub async fn clear_import_cache(
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// 退出应用（安卓系统返回在书架根目录时由前端调用；Kotlin 侧 finish Activity）
+#[tauri::command]
+pub async fn exit_app(handle: State<'_, ImportHandle<Wry>>) -> Result<(), String> {
+    let _: serde_json::Value = handle
+        .0
+        .run_mobile_plugin_async("exitApp", serde_json::json!({}))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 查询系统栏高度（px）：状态栏 top / 导航栏 bottom，供顶栏与底栏避让
+#[tauri::command]
+pub async fn system_bar_insets(
+    handle: State<'_, ImportHandle<Wry>>,
+) -> Result<InsetsResponse, String> {
+    handle
+        .0
+        .run_mobile_plugin_async("systemBarInsets", serde_json::json!({}))
+        .await
+        .map_err(|e| e.to_string())
 }

@@ -7,6 +7,7 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import androidx.activity.result.ActivityResult
+import androidx.core.view.WindowInsetsCompat
 import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -128,6 +129,33 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         rejectOnUi(invoke, e.message ?: "清理导入缓存失败")
       }
     }.start()
+  }
+
+  /** 退出应用：安卓系统返回在书架根目录时由前端调用。
+   *  finish() 与系统默认的「返回即退出」行为一致；书库状态均已实时落盘，
+   *  无需额外清理。先 resolve 再 finish，让前端的 await 正常收尾。 */
+  @Command
+  fun exitApp(invoke: Invoke) {
+    invoke.resolve()
+    activity.finish()
+  }
+
+  /** 系统栏高度（px）：top = 状态栏，bottom = 导航栏。
+   *  WebView 的 env(safe-area-inset-*) 在部分设备上取不到值（返回 0），
+   *  顶栏 / 底栏 / 弹窗的避让改由前端查询这里的真实高度。 */
+  @Command
+  fun systemBarInsets(invoke: Invoke) {
+    val rootInsets = activity.window?.decorView?.rootWindowInsets
+    val insets = if (rootInsets != null) {
+      WindowInsetsCompat.toWindowInsetsCompat(rootInsets)
+    } else {
+      WindowInsetsCompat.CONSUMED
+    }
+    invoke.resolve(
+      JSObject()
+        .put("top", insets.getInsets(WindowInsetsCompat.Type.statusBars()).top)
+        .put("bottom", insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom)
+    )
   }
 
   // ---------- 内部实现 ----------

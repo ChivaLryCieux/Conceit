@@ -14,6 +14,17 @@
 //! 命令统一注册在应用的 invoke_handler 里（不占用 `plugin:` 命名空间），
 //! 桌面端由 [stub] 提供同签名的错误返回——前端只在 Android 上调用它们。
 
+use serde::{Deserialize, Serialize};
+
+/// Kotlin `systemBarInsets` 的响应：系统栏高度（px）
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct InsetsResponse {
+    /// 状态栏高度
+    pub top: u32,
+    /// 导航栏高度
+    pub bottom: u32,
+}
+
 #[cfg(target_os = "android")]
 mod android;
 
