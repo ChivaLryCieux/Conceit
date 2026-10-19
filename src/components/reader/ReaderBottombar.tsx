@@ -21,8 +21,9 @@ interface Props {
   onExit: () => void;
 }
 
-/** 阅读器唯一顶栏：退出、标题、缩放、进度滑块与计数 */
-export default function ReaderTopbar({
+/** 阅读器唯一底栏：退出、标题、缩放、进度滑块与计数。
+ *  放在底部而非顶部——顶部紧邻手机状态栏，容易误触。 */
+export default function ReaderBottombar({
   title,
   zoom,
   zoomAtMin,
@@ -39,7 +40,7 @@ export default function ReaderTopbar({
 }: Props) {
   return (
     <div
-      className={`reader-topbar${chromeVisible ? "" : " chrome-hidden"}`}
+      className={`reader-bottombar${chromeVisible ? "" : " chrome-hidden"}`}
       onClick={(e) => e.stopPropagation()}
     >
       <button type="button" className="btn" onClick={onExit}>

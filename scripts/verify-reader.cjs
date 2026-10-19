@@ -124,7 +124,7 @@ async function main() {
   /* ---------- 浮层与铺满 ---------- */
   await sleep(1200); // 等图片就位
   const layout = await evalJs(`(() => {
-    const bar = document.querySelector('.reader-topbar');
+    const bar = document.querySelector('.reader-bottombar');
     const scroll = document.querySelector('.reader-scroll');
     const track = document.querySelector('.reader-track');
     const cs = getComputedStyle(bar);
@@ -143,7 +143,7 @@ async function main() {
     };
   })()`);
   check(
-    "顶部栏为绝对定位浮层",
+    "底部栏为绝对定位浮层",
     layout.barPosition === "absolute",
     `position=${layout.barPosition}`
   );
@@ -164,7 +164,7 @@ async function main() {
   await click(cx, cy); // 隐藏
   await sleep(400);
   const hidden = await evalJs(`(() => {
-    const bar = document.querySelector('.reader-topbar');
+    const bar = document.querySelector('.reader-bottombar');
     const track = document.querySelector('.reader-track');
     return {
       hasClass: bar.classList.contains('chrome-hidden'),
@@ -195,7 +195,7 @@ async function main() {
   await click(cx, cy); // 显示
   await sleep(400);
   const shown = await evalJs(`(() => ({
-    hasClass: document.querySelector('.reader-topbar').classList.contains('chrome-hidden'),
+    hasClass: document.querySelector('.reader-bottombar').classList.contains('chrome-hidden'),
     trackPaddingTop: getComputedStyle(document.querySelector('.reader-track')).paddingTop,
     pageTop: document.querySelector('.reader-page').getBoundingClientRect().top,
   }))()`);
@@ -245,7 +245,7 @@ async function main() {
 
   /* ---------- 退出阅读器 ---------- */
   await evalJs(
-    `document.querySelector('.reader-topbar .btn')?.click()`
+    `document.querySelector('.reader-bottombar .btn')?.click()`
   );
   await sleep(400);
   const closed = await evalJs(`!document.querySelector('.reader')`);

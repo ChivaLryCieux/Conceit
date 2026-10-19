@@ -281,7 +281,7 @@ async function main() {
         if (opened) {
           await sleep(1200);
           const rd = await evalJs(`(() => {
-            const bar = document.querySelector('.reader-topbar');
+            const bar = document.querySelector('.reader-bottombar');
             const slider = document.querySelector('.reader-slider');
             const zoom = document.querySelector('.reader-zoom');
             const img = document.querySelector('.reader-page');
@@ -296,7 +296,7 @@ async function main() {
             };
           })()`);
           check(
-            `[${vp.name}] 顶栏两行排布（滑块换行到第二行）`,
+            `[${vp.name}] 底栏两行排布（滑块换行到第二行）`,
             rd.sliderTop >= rd.zoomBottom - 1,
             `sliderTop=${Math.round(rd.sliderTop)} zoomBottom=${Math.round(rd.zoomBottom)}`
           );
@@ -318,7 +318,7 @@ async function main() {
           await tap(rd.innerWidth / 2, rd.winHeight * 0.6);
           await sleep(400);
           const hid = await evalJs(`(() => ({
-            hidden: document.querySelector('.reader-topbar').classList.contains('chrome-hidden'),
+            hidden: document.querySelector('.reader-bottombar').classList.contains('chrome-hidden'),
             pageTop: document.querySelector('.reader-page').getBoundingClientRect().top,
           }))()`);
           check(`[${vp.name}] 点按画面隐藏工具栏`, hid.hidden);
@@ -331,7 +331,7 @@ async function main() {
           await sleep(300);
 
           // 退出
-          await evalJs(`document.querySelector('.reader-topbar .btn').click()`);
+          await evalJs(`document.querySelector('.reader-bottombar .btn').click()`);
           await sleep(400);
           check(`[${vp.name}] 可退出阅读器`, await evalJs(`!document.querySelector('.reader')`));
         }

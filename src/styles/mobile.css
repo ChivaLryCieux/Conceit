@@ -182,13 +182,13 @@
     font-size: 10px;
   }
 
-  /* 阅读器顶栏：第一行 退出 + 标题 + 缩放，第二行 进度 + 计数 */
-  .reader-topbar {
+  /* 阅读器底栏：第一行 退出 + 标题 + 缩放，第二行 进度 + 计数 */
+  .reader-bottombar {
     gap: 8px;
-    padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   }
 
-  .reader-topbar .btn {
+  .reader-bottombar .btn {
     padding: 9px 12px;
     font-size: 13px;
   }
@@ -290,12 +290,12 @@
     padding: 10px;
   }
 
-  .reader-topbar {
+  .reader-bottombar {
     padding-left: 8px;
     padding-right: 8px;
   }
 
-  .reader-topbar .btn {
+  .reader-bottombar .btn {
     padding: 9px 9px;
     font-size: 12px;
   }

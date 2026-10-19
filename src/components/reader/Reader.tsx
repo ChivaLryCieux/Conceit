@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { fetchPages, saveProgress } from "../../api";
-import ReaderTopbar from "./ReaderTopbar";
+import ReaderBottombar from "./ReaderBottombar";
 import type { Item, Toast } from "../../types";
 
 interface Props {
@@ -17,7 +17,7 @@ function clampZoom(z: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
 }
 
-/** 阅读器：竖向拼接图片上下滑动；点击画面显隐唯一顶部框栏 */
+/** 阅读器：竖向拼接图片上下滑动；点击画面显隐唯一底部框栏 */
 export default function Reader({ item, onExit, onToast }: Props) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -169,7 +169,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
 
   return (
     <div className="reader" ref={rootRef}>
-      <ReaderTopbar
+      <ReaderBottombar
         title={item.title}
         zoom={zoom}
         zoomAtMin={zoom <= ZOOM_MIN}

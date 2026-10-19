@@ -1,4 +1,4 @@
-/* 阅读器：浮层顶栏、缩放控件、进度滑块、滚动区与图片轨 */
+/* 阅读器：浮层底栏、缩放控件、进度滑块、滚动区与图片轨 */
 /* ---------- 阅读器 ---------- */
 
 .reader {
@@ -8,26 +8,27 @@
   z-index: 60;
 }
 
-.reader-topbar {
+/* 底栏而非顶栏：顶部与手机状态栏相邻，容易误触 */
+.reader-bottombar {
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
   right: 0;
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   background: rgba(20, 21, 26, 0.94);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
   z-index: 2;
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-.reader-topbar.chrome-hidden {
+.reader-bottombar.chrome-hidden {
   opacity: 0;
-  transform: translateY(-100%);
+  transform: translateY(100%);
   pointer-events: none;
 }
 
@@ -107,7 +108,8 @@
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  /* 顶部内边距恒定：工具栏显隐是纯浮层效果，绝不能推动漫画内容 */
+  /* 内容顶部贴屏幕顶：工具栏显隐是纯浮层效果，绝不能推动漫画内容；
+     底部留 55vh，让最后一页能滚到屏幕中上部从容阅读 */
   padding: 0 0 55vh;
 }
 
@@ -131,10 +133,11 @@
   font-size: 14px;
 }
 
+/* 提示条放顶部：底部已被工具栏占据（两者随 chromeVisible 同时显隐） */
 .reader-hint {
   position: fixed;
   left: 50%;
-  bottom: calc(18px + env(safe-area-inset-bottom));
+  top: calc(18px + env(safe-area-inset-top));
   transform: translateX(-50%);
   background: rgba(20, 21, 26, 0.9);
   border: 1px solid var(--border);
