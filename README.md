@@ -19,6 +19,7 @@
 - **书库管理**：新建文件夹（应用内弹窗）、重命名、删除（文件夹递归删除其中内容）、移动到根目录
 - **封面缩略图**：书架封面使用导入时预生成的 480px 缩略图（原图动辄数 MB，避免 WebView 为一个小卡片解码整张大图）；阅读仍加载原图
 - **移动端适配**：响应式布局（手机 / 平板 / 小屏手机）、安全区适配、触屏手势（长按打开操作菜单、长按拖动排序）、底部弹出式设置面板、Pinch 缩放
+- **系统返回**（安卓）：硬件返回键与边缘滑动手势统一拦截——阅读器中返回到书架、书架内逐级返回文件夹、只有根目录才退出应用；弹窗与操作菜单优先响应返回
 - **纯 SVG 图标**：界面不使用 emoji，全部为内联 SVG 图标
 
 ## 快速开始
@@ -62,9 +63,10 @@ pnpm tauri build   # 打包发布版
 | 布局 | 断点 1024 / 640 / 380px；书架卡片网格自动 2–5 列；头部品牌与操作按钮在窄屏分行，面包屑可横向滚动 |
 | 触屏 | 设置按钮常显（桌面为 hover 显现）；去掉 hover 粘滞效果，改用按压缩放反馈；按钮点击目标加大 |
 | 手势 | 长按卡片打开操作菜单（等价于桌面右键）；长按后拖动即可排序，浮动卡片跟随手指，落到文件夹上为移入；捏合 / Ctrl+滚轮缩放漫画 |
+| 系统返回 | 硬件返回键与边缘滑动手势由 `MainActivity` 拦截并转交前端：阅读器→书架、文件夹逐级返回、根目录才退出；模态框 / 操作菜单优先消费 |
 | 阅读器 | 底部工具栏在窄屏自动两行排布；漫画始终铺满屏幕；工具栏显隐不影响内容位置 |
 | 弹窗 | 手机上模态框变为底部弹出面板，内部滚动，避让 Home 指示条 |
-| 安全区 | `env(safe-area-inset-*)` 已接入头部、工具栏、提示条、Toast 与弹窗，适配刘海 / 小黑条 |
+| 安全区 | 状态栏 / 导航栏高度经原生桥同步为 CSS 变量（安卓 WebView 的 `env(safe-area-inset-*)` 部分设备取不到值），顶栏、工具栏、提示条、Toast 与弹窗均已避让 |
 | 视口 | `viewport-fit=cover` + 禁用页面缩放（缩放由应用内部控制） |
 
 书库路径使用 Tauri 跨平台的 `app_data_dir()`，Android / iOS 上会自动落到应用私有目录，无需改动。
@@ -224,6 +226,7 @@ src-tauri/                   后端（Rust + Tauri 2）
 ├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入）
 ├── src/mobile_import.rs     Android 原生桥（SAF 目录 / zip 选择等，桌面端为存根）
 ├── android/ConceitPlugin.kt Android 原生桥的 Kotlin 实现（构建时同步进 gen/android）
+├── android/MainActivity.kt  主 Activity：拦截系统返回转交前端（构建时同步进 gen/android）
 └── tauri.conf.json          桌面配置（asset 协议加载本地图片）
 ```
 
@@ -248,6 +251,26 @@ Android 上 `tauri-plugin-dialog` 有两个硬伤，直接用会报错：
 > （`tauri android init` 重建 gen/android 后无需手动拷贝）。仓库里同时保留了工作副本，
 > 直接用官方 `tauri android build` 也能编到。
 
+### 系统返回与系统栏适配
+
+**系统返回**：`MainActivity` 在 `onCreate` 里向 `OnBackPressedDispatcher` 注册回调。
+wry 因 `handleBackNavigation = false` 不注册自己的回调，不拦截时系统会直接结束
+Activity——在阅读器里划边缘返回也会退出应用。拦截后把系统返回（硬件返回键与
+边缘滑动手势走同一条链路）转发成前端的 `conceit:android-back` DOM 事件，
+由 `src/App.tsx` 按当前状态决定去向：
+
+1. 阅读器打开 → 回到书架（阅读器卸载时自动保存进度）
+2. 书架内 → 文件夹逐级返回上一层
+3. 根目录 → 调 `exit_app` 退出（明确选择「直接退出」而非「再按一次退出」）
+
+弹窗与操作菜单通过 `src/backHandler.ts` 的返回处理栈优先消费，不会被误退出。
+
+**系统栏避让**：安卓 WebView 的 `env(safe-area-inset-*)` 在部分设备上返回 0，
+顶栏会被状态栏盖住。`system_bar_insets` 命令经 `WindowInsetsCompat` 取真实高度，
+`useSystemBarInsets` 在启动与每次 `resize`（旋屏、折叠屏形态切换——Activity 声明了
+`configChanges`，页面不重载）后把它同步为 `--status-bar-h` / `--nav-bar-h` 两个
+CSS 变量；`:root` 里的默认值仍取 `env()`，桌面 / iOS 行为不变。
+
 ### 实现要点
 
 - **自维护书库**：导入即把图片复制进 `library/manga/<id>/`，书库与源目录完全独立
@@ -259,6 +282,10 @@ Android 上 `tauri-plugin-dialog` 有两个硬伤，直接用会报错：
 - **兼容旧索引**：`show_cover`、`thumb` 等新字段均带 serde 默认值，旧 `index.json` 可直接读取
 - **Android 导入桥**：插件对话框在 Android 上既不能选目录、也只返回 `content://` URI，
   由内置 Kotlin 插件经 SAF 拿到缓存里的真实路径后再走同一套导入逻辑（详见上文）
+- **系统返回**：`MainActivity` 拦截系统返回并转交前端，阅读器→书架、文件夹逐级返回、
+  根目录才退出；弹窗经返回处理栈优先消费（详见上文）
+- **系统栏避让**：状态栏 / 导航栏高度经原生桥同步为 CSS 变量，兜底 WebView
+  `env(safe-area-inset-*)` 在部分安卓设备上取不到值的问题（详见上文）
 - **Android 打包**：`tauri android build` 在 Windows 上受符号链接权限所限，改用
   `scripts/build-android.mjs`（文件复制 + 直接调 Gradle），签名走 `keystore.properties`
 
