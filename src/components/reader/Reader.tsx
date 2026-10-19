@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { fetchPages, saveProgress } from "../../api";
+import { useBackHandler } from "../../backHandler";
 import ReaderBottombar from "./ReaderBottombar";
 import type { Item, Toast } from "../../types";
 
@@ -33,6 +34,12 @@ export default function Reader({ item, onExit, onToast }: Props) {
   const fractionRef = useRef(item.manga?.progress ?? 0);
   const lastSaveRef = useRef(0);
   const restoreDoneRef = useRef(false);
+
+  /* ---------- 系统返回（安卓硬件返回键 / 边缘滑动手势）→ 退出阅读 ---------- */
+  useBackHandler(() => {
+    onExit();
+    return true;
+  });
 
   /* ---------- 加载图片 ---------- */
   useEffect(() => {

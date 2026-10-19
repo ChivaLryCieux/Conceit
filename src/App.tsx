@@ -4,7 +4,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import Shelf from "./components/shelf/Shelf";
 import Reader from "./components/reader/Reader";
-import { fetchSnapshot, importSources } from "./api";
+import { fetchSnapshot, importSources, exitApp } from "./api";
+import { dispatchBack } from "./backHandler";
 import type { Item, LibrarySnapshot, Toast } from "./types";
 
 export default function App() {
@@ -62,6 +63,25 @@ export default function App() {
   const currentFolder = folderStack.length
     ? folderStack[folderStack.length - 1]
     : null;
+
+  /* ---------- 安卓系统返回（硬件返回键 / 边缘滑动手势） ----------
+   * MainActivity 拦截系统返回后转发 `conceit:android-back` 事件（桌面端不存在）：
+   * 阅读器打开 → 回书架；书架内 → 文件夹逐级返回；根目录 → 退出应用。
+   * 模态框 / 操作菜单经返回处理栈优先消费，不会被误退出。
+   * 依赖带 folderStack.length：层级变化时需重新注册，否则闭包里是首次
+   * 渲染的空栈，逐级返回会失效、直接退出。 */
+  useEffect(() => {
+    const onSystemBack = () => {
+      if (dispatchBack()) return;
+      if (folderStack.length > 0) {
+        setFolderStack((s) => s.slice(0, -1));
+        return;
+      }
+      void exitApp().catch(() => {});
+    };
+    window.addEventListener("conceit:android-back", onSystemBack);
+    return () => window.removeEventListener("conceit:android-back", onSystemBack);
+  }, [folderStack.length]);
 
   /** 拖拽文件/文件夹到窗口 = 直接导入 */
   useEffect(() => {

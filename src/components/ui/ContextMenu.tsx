@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useBackHandler } from "../../backHandler";
 
 export interface MenuAction {
   label: string;
@@ -14,7 +15,7 @@ interface Props {
   onClose: () => void;
 }
 
-/** 轻量右键/长按菜单：点击外部 / Esc / 滚动 / 缩放时关闭 */
+/** 轻量右键/长按菜单：点击外部 / Esc / 滚动 / 缩放时关闭；安卓系统返回同样关闭 */
 export default function ContextMenu({ x, y, actions, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   /** 先用估算值定位，挂载后按真实尺寸夹取，避免小屏上溢出屏幕 */
@@ -22,6 +23,12 @@ export default function ContextMenu({ x, y, actions, onClose }: Props) {
     left: Math.max(8, Math.min(x, window.innerWidth - 190)),
     top: Math.max(8, Math.min(y, window.innerHeight - actions.length * 36 - 24)),
   }));
+
+  // 系统返回（安卓硬件返回键 / 边缘滑动手势）关闭菜单
+  useBackHandler(() => {
+    onClose();
+    return true;
+  });
 
   useEffect(() => {
     const close = () => onClose();

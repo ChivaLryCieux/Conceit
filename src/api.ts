@@ -102,6 +102,11 @@ export async function isAndroid(): Promise<boolean> {
   }
 }
 
+/** 退出应用：安卓系统返回在书架根目录时调用（桌面端存根报错，正常不会触达） */
+export async function exitApp(): Promise<void> {
+  return invoke("exit_app");
+}
+
 /** 某个容器（root 或文件夹）下按排序排列的条目 */
 export function childrenOf(
   index: LibraryIndex,

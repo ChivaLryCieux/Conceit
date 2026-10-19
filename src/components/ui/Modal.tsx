@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { useBackHandler } from "../../backHandler";
 
 interface Props {
   title: string;
@@ -9,7 +10,7 @@ interface Props {
   wide?: boolean;
 }
 
-/** 通用模态弹窗：遮罩点击 / Esc 关闭 */
+/** 通用模态弹窗：遮罩点击 / Esc 关闭；安卓系统返回同样只关闭弹窗 */
 export default function Modal({
   title,
   onClose,
@@ -17,6 +18,12 @@ export default function Modal({
   footer,
   wide,
 }: Props) {
+  // 系统返回（安卓硬件返回键 / 边缘滑动手势）关闭弹窗，而不是退出应用
+  useBackHandler(() => {
+    onClose();
+    return true;
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
