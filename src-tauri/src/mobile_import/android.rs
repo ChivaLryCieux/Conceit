@@ -1,6 +1,6 @@
-//! Android 导入桥的原生实现。
+//! Android 原生桥的实现。
 //!
-//! 通过 tauri 插件的 setup 钩子把 Kotlin 端 `ImportPlugin` 注册进
+//! 通过 tauri 插件的 setup 钩子把 Kotlin 端 `ConceitPlugin` 注册进
 //! PluginManager，句柄存入应用状态；下面的命令再把调用转给它。
 //! 注册失败（例如 Kotlin 类没被打进包）只记日志不中断启动——
 //! 此时命令会因状态缺失而报错，导入功能不可用但应用仍可正常使用。
@@ -12,10 +12,10 @@ use tauri::{
 };
 
 /// Kotlin 插件在 PluginManager 中的注册名（前后端必须一致）
-pub const PLUGIN_NAME: &str = "conceit-import";
+pub const PLUGIN_NAME: &str = "conceit-android";
 /// Kotlin 类所在的包名（`register_android_plugin` 用它拼 JNI 类路径）
 const PLUGIN_IDENTIFIER: &str = "com.conceit.mangareader";
-const PLUGIN_CLASS: &str = "ImportPlugin";
+const PLUGIN_CLASS: &str = "ConceitPlugin";
 
 /// 保存在 Tauri 状态里的 Kotlin 插件句柄
 pub struct ImportHandle<R: Runtime>(PluginHandle<R>);

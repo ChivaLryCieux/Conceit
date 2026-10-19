@@ -46,7 +46,7 @@ export function useShelfMutations({
       if (android) {
         // Android：插件对话框不支持选目录，文件选择器返回的也是 content:// URI，
         // std::fs 用不了——走内置原生桥，直接拿到缓存里的真实路径
-        // （见 src-tauri/src/mobile_import.rs 与 src-tauri/android/ImportPlugin.kt）
+        // （见 src-tauri/src/mobile_import.rs 与 src-tauri/android/ConceitPlugin.kt）
         if (kind === "dir") {
           const dir = await pickDirectory();
           if (!dir) return; // 用户取消

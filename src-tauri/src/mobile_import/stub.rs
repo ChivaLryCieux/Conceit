@@ -6,7 +6,7 @@ use tauri::plugin::{Builder, TauriPlugin};
 
 /// 与 Android 端一致的空插件（无 setup 行为）；名字仅用于标识，无实际作用
 pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
-    Builder::new("conceit-import").build()
+    Builder::new("conceit-android").build()
 }
 
 /// `pick_directory` 的桌面存根

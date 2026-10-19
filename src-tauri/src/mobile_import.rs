@@ -1,4 +1,4 @@
-//! Android 导入桥。
+//! Android 原生桥。
 //!
 //! 背景：`tauri-plugin-dialog` 在 Android 上有两个硬伤——
 //! 1. **没有目录选择器**：JS 传 `directory: true` 时，插件 Rust 端直接返回
@@ -6,7 +6,7 @@
 //! 2. **文件选择器返回的不是路径**：Android 端 `createPickFilesResult` 返回的是
 //!    `content://` URI 字符串，`std::fs` 无法读取（前端表现为「路径不存在」）。
 //!
-//! 解决办法：应用内置一个 Kotlin 插件（`src-tauri/android/ImportPlugin.kt`，
+//! 解决办法：应用内置一个 Kotlin 插件（`src-tauri/android/ConceitPlugin.kt`，
 //! 构建时由 `scripts/build-android.mjs` 同步进 `gen/android`），用系统文档选择器
 //! （SAF）完成「选择 → 复制到应用缓存目录 → 返回真实路径」。之后
 //! `import_sources` 按普通文件夹 / zip 处理即可，书库与源目录保持独立。

@@ -129,7 +129,7 @@ node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
 ```
 
 脚本在调用 Gradle 前会把 `src-tauri/android/*.kt`（应用自有的 Kotlin 源码，
-目前为导入桥 `ImportPlugin.kt`）同步进 `gen/android/app/src/main/java/`，
+目前为原生桥 `ConceitPlugin.kt`）同步进 `gen/android/app/src/main/java/`，
 因此执行过 `tauri android init` 重建工程后也无需手动拷贝。
 
 Gradle 的原始产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`，
@@ -222,8 +222,8 @@ src/                         前端（React 18 + Vite 5 + TypeScript 严格模�
 src-tauri/                   后端（Rust + Tauri 2）
 ├── src/library.rs           书库模型：索引持久化、自然排序、目录复制、zip 解压、漫画数量统计、封面缩略图生成
 ├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入）
-├── src/mobile_import.rs     Android 导入桥（SAF 目录 / zip 选择，桌面端为存根）
-├── android/ImportPlugin.kt  Android 导入桥的 Kotlin 实现（构建时同步进 gen/android）
+├── src/mobile_import.rs     Android 原生桥（SAF 目录 / zip 选择等，桌面端为存根）
+├── android/ConceitPlugin.kt Android 原生桥的 Kotlin 实现（构建时同步进 gen/android）
 └── tauri.conf.json          桌面配置（asset 协议加载本地图片）
 ```
 
@@ -236,7 +236,7 @@ Android 上 `tauri-plugin-dialog` 有两个硬伤，直接用会报错：
 2. **文件选择器返回的不是路径**——Android 端返回 `content://` URI 字符串，
    `std::fs` 无法读取，前端表现为「路径不存在: content://…」。
 
-为此应用内置了一个 Kotlin 插件（`src-tauri/android/ImportPlugin.kt`），用系统文档选择器
+为此应用内置了一个 Kotlin 插件（`src-tauri/android/ConceitPlugin.kt`），用系统文档选择器
 （SAF，`ACTION_OPEN_DOCUMENT_TREE` / `ACTION_GET_CONTENT`）完成
 「选择 → 复制到应用缓存目录 → 返回真实路径」，Rust 侧之后按普通文件夹 / zip 处理。
 复制时保留原始名称，导入后的漫画标题仍然是有意义的文件夹名 / 压缩包名；

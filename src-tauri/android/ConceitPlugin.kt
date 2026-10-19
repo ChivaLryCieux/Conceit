@@ -19,23 +19,26 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Conceit 的 Android 导入桥。
+ * Conceit 的 Android 原生桥。
  *
- * 为什么需要它：
- * 1. tauri-plugin-dialog 在 Android 上没有目录选择器——JS 传 `directory: true` 时，
- *    插件 Rust 端直接返回 FolderPickerNotImplemented（表现为「打开选择对话框失败」）；
- * 2. 它的文件选择器返回的是 content:// URI 字符串，而不是文件系统路径，
+ * 为什么需要它：tauri-plugin-dialog 在 Android 上有两个硬伤——
+ * 1. 没有目录选择器——JS 传 `directory: true` 时，插件 Rust 端直接返回
+ *    FolderPickerNotImplemented（表现为「打开选择对话框失败」）；
+ * 2. 文件选择器返回的不是路径——它返回的是 content:// URI 字符串，
  *    Rust 的 std::fs 无法读取（表现为「路径不存在」）。
  *
  * 这里用系统文档选择器（SAF）完成「选择 → 复制到应用缓存目录 → 返回真实路径」，
  * Rust 侧之后按普通文件夹 / zip 处理（见 src-tauri/src/mobile_import.rs）。
  * 复制时保留原始名称，导入后的漫画标题仍然是有意义的文件夹名 / 压缩包名。
  *
+ * 除导入选择外，桌面端没有对应物的原生能力（退出应用、系统栏高度…）
+ * 也统一放在这个插件里，由 desktop 存根给出同签名错误返回。
+ *
  * 注意：ActivityResult 回调运行在主线程，复制整棵目录树可能很慢，
  * 因此复制放在后台线程做，完成后回到主线程 resolve，避免 ANR。
  */
 @TauriPlugin
-class ImportPlugin(private val activity: Activity) : Plugin(activity) {
+class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
 
   /** 选择 zip 文件（可多选），复制进缓存目录，返回真实路径列表 */
   @Command

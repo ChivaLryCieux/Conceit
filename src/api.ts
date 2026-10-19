@@ -73,10 +73,10 @@ export async function fetchPages(id: string): Promise<string[]> {
   return invoke<string[]>("manga_pages", { id });
 }
 
-/* ---------- Android 导入桥（仅 Android 有意义，桌面端为报错存根） ----------
+/* ---------- Android 原生桥（仅 Android 有意义，桌面端为报错存根） ----------
  * Android 上 tauri-plugin-dialog 不支持目录选择，文件选择器返回的也是
  * content:// URI 而非文件系统路径；这些命令由内置 Kotlin 插件
- * （src-tauri/android/ImportPlugin.kt）返回缓存里的真实路径。 */
+ * （src-tauri/android/ConceitPlugin.kt）返回缓存里的真实路径。 */
 
 /** 打开系统目录选择器，返回缓存中的真实目录路径；取消返回 null */
 export async function pickDirectory(): Promise<string | null> {
