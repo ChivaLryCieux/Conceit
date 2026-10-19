@@ -159,7 +159,11 @@ keyPassword=<密码>
 > 密钥与密码不要提交到 git。
 
 **安装到手机**：开启「设置 → 安全 → 安装未知应用」，把 APK 传到手机点击即可；
-或用数据线执行 `adb install -r Conceit-0.1.0-release.apk`。
+或用数据线执行 `adb install -r app-universal-release.apk`。
+
+> APK 文件名是 Gradle 的默认命名（模块名 `app` + 变体 `universal` + `release`），
+> 与应用本身的名字无关——安装后图标和设置里显示的是 `strings.xml` 中的 `app_name`（Conceit），
+> 应用标识为 `com.conceit.mangareader`。
 
 ## 书库目录结构
 
