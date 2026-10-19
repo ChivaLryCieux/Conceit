@@ -132,8 +132,10 @@ node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
 目前为导入桥 `ImportPlugin.kt`）同步进 `gen/android/app/src/main/java/`，
 因此执行过 `tauri android init` 重建工程后也无需手动拷贝。
 
-产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`
-（arm64-v8a + armeabi-v7a 通用包，约 13 MB，minSdk 24 / Android 7.0+）。
+Gradle 的原始产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`，
+打包脚本会额外复制一份到仓库根目录、按 `Conceit-<版本>-release.apk` 命名
+（版本取自 `tauri.conf.json`，如 `Conceit-0.1.1-release.apk`），方便直接传手机安装；
+arm64-v8a + armeabi-v7a 通用包，约 13 MB，minSdk 24 / Android 7.0+。
 
 > Gradle 首次运行需要下载 Gradle 发行版与 AGP 等依赖；国内网络下 `services.gradle.org`
 > 可能很慢，可先从镜像下载 `gradle-9.6.1-bin.zip` 解压到本地，脚本会优先使用本地安装。
@@ -159,9 +161,10 @@ keyPassword=<密码>
 > 密钥与密码不要提交到 git。
 
 **安装到手机**：开启「设置 → 安全 → 安装未知应用」，把 APK 传到手机点击即可；
-或用数据线执行 `adb install -r app-universal-release.apk`。
+或用数据线执行 `adb install -r Conceit-0.1.1-release.apk`。
 
-> APK 文件名是 Gradle 的默认命名（模块名 `app` + 变体 `universal` + `release`），
+> 打包脚本会把 Gradle 的原始产物（`app-universal-release.apk`，Gradle 默认的
+> 模块名+变体命名）复制为 `Conceit-<版本>-release.apk` 放到仓库根目录，
 > 与应用本身的名字无关——安装后图标和设置里显示的是 `strings.xml` 中的 `app_name`（Conceit），
 > 应用标识为 `com.conceit.mangareader`。
 

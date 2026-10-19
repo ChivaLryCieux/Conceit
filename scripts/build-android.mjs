@@ -25,6 +25,7 @@ import {
   existsSync,
   mkdirSync,
   copyFileSync,
+  readFileSync,
   rmSync,
   readdirSync,
   statSync,
@@ -216,6 +217,24 @@ function runGradle() {
   });
 }
 
+/** 从 tauri.conf.json 读应用版本（版本号的唯一来源） */
+function appVersion() {
+  const conf = JSON.parse(
+    readFileSync(path.join(SRC_TAURI, "tauri.conf.json"), "utf8")
+  );
+  if (!conf.version) die("tauri.conf.json 里没有 version 字段");
+  return conf.version;
+}
+
+/** 把 Gradle 产出的 app-universal-release.apk 复制为
+ *  Conceit-<版本>-release.apk（放仓库根目录，方便直接传手机安装） */
+function publishApk(gradleApk, version) {
+  const friendly = path.join(ROOT, `Conceit-${version}-release.apk`);
+  copyFileSync(gradleApk, friendly);
+  log(`完成：${friendly}`);
+  log(`（Gradle 原始产物：${gradleApk}）`);
+}
+
 function main() {
   checkEnv();
   if (!skipFrontend) {
@@ -237,7 +256,7 @@ function main() {
     "app-universal-release.apk"
   );
   if (!existsSync(apk)) die(`构建似乎成功了但找不到 ${apk}`);
-  log(`完成：${apk}`);
+  publishApk(apk, appVersion());
 }
 
 main();

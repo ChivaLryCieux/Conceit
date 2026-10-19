@@ -6,6 +6,8 @@ dist/
 dist-ssr/
 coverage/
 *.tsbuildinfo
+# Android APK：打包脚本会复制一份到仓库根目录（Conceit-<版本>-release.apk）
+Conceit-*-release.apk
 
 # ---- Rust / Tauri（构建产物与生成文件全部位于 target/）----
 target/
