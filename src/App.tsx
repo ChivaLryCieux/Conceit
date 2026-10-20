@@ -126,7 +126,7 @@ export default function App() {
   /** 面包屑名称 */
   const breadcrumbs = useMemo(() => {
     const list: { id: string | null; title: string }[] = [
-      { id: null, title: "全部书架" },
+      { id: null, title: "书架" },
     ];
     for (const fid of folderStack) {
       const item = snapshot?.index.items.find((i) => i.id === fid);
