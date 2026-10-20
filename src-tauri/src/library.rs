@@ -307,6 +307,91 @@ pub fn remove_cover_thumb(root: &Path, id: &str) {
     }
 }
 
+/// 把外部图片文件复制进某部漫画的目录，返回新文件在漫画目录内的相对路径。
+///
+/// 新图片一律平铺到漫画目录根部；与既有文件重名时自动加 " (n)" 序号，
+/// 不覆盖任何已有页面。调用方负责把返回的名称追加进 `pages`。
+pub fn copy_images_into_manga(
+    root: &Path,
+    id: &str,
+    src_paths: &[PathBuf],
+) -> Result<Vec<String>, String> {
+    let dest_dir = root.join(MANGA_DIR_NAME).join(id);
+    fs::create_dir_all(&dest_dir)
+        .map_err(|e| format!("创建漫画目录失败 {}: {e}", dest_dir.display()))?;
+    let mut added: Vec<String> = Vec::new();
+    for src in src_paths {
+        if !src.is_file() {
+            return Err(format!("不是文件: {}", src.display()));
+        }
+        if !is_image_file(src) {
+            return Err(format!("不是图片文件: {}", src.display()));
+        }
+        let name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("无法读取文件名: {}", src.display()))?;
+        let rel = unique_file_name(&dest_dir, name);
+        fs::copy(src, dest_dir.join(&rel))
+            .map_err(|e| format!("复制图片失败 {}: {e}", src.display()))?;
+        added.push(rel);
+    }
+    Ok(added)
+}
+
+/// 在 dir 下为 desired 生成不冲突的文件名（重名时在扩展名前加 " (n)"）
+fn unique_file_name(dir: &Path, desired: &str) -> String {
+    if !dir.join(desired).exists() {
+        return desired.to_string();
+    }
+    let (stem, ext) = match desired.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, Some(e)),
+        _ => (desired, None),
+    };
+    for n in 1..1000 {
+        let candidate = match ext {
+            Some(e) => format!("{stem} ({n}).{e}"),
+            None => format!("{stem} ({n})"),
+        };
+        if !dir.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    format!("{stem} ({})", now_unix())
+}
+
+/// 删除某部漫画目录中的若干图片文件，返回实际删除的数量（文件不存在时跳过）。
+/// 防御性拒绝绝对路径与 `..` 穿越——正常数据来自 scan_images，不会是这两种。
+pub fn delete_manga_files(root: &Path, id: &str, pages: &[String]) -> usize {
+    let dir = root.join(MANGA_DIR_NAME).join(id);
+    let mut removed = 0;
+    for rel in pages {
+        let path = Path::new(rel);
+        let escapes = path.is_absolute() || rel.split(['/', '\\']).any(|c| c == "..");
+        if escapes {
+            continue;
+        }
+        let full = dir.join(path);
+        if full.is_file() && fs::remove_file(&full).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// 判断两组页面是否同一集合（顺序不同也算一致）——自定义顺序前的校验，
+/// 防止前端把增删伪装成重排传进来
+pub fn same_page_set(current: &[String], next: &[String]) -> bool {
+    if current.len() != next.len() {
+        return false;
+    }
+    let mut a: Vec<&str> = current.iter().map(|s| s.as_str()).collect();
+    let mut b: Vec<&str> = next.iter().map(|s| s.as_str()).collect();
+    a.sort_unstable();
+    b.sort_unstable();
+    a == b
+}
+
 /// 判断扩展名是否为图片
 pub fn is_image_file(path: &Path) -> bool {    path.extension()
         .and_then(|e| e.to_str())
@@ -734,5 +819,75 @@ mod tests {
         fs::write(&path, "").unwrap();
         assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 0);
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn copy_images_into_manga_avoids_name_collisions() {
+        let root = temp_dir("add-pages");
+        let manga_dir = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(&manga_dir).unwrap();
+        fs::write(manga_dir.join("001.jpg"), b"old").unwrap();
+
+        let src = temp_dir("add-pages-src");
+        fs::write(src.join("001.jpg"), b"new").unwrap(); // 与已有页重名
+        fs::write(src.join("002.png"), b"new2").unwrap();
+        fs::write(src.join("notes.txt"), b"junk").unwrap(); // 非图片应报错
+
+        // 先只复制两张图片
+        let added = copy_images_into_manga(
+            &root,
+            "m1",
+            &[src.join("001.jpg"), src.join("002.png")],
+        )
+        .unwrap();
+        assert_eq!(added, vec!["001 (1).jpg", "002.png"]);
+        // 原文件不被覆盖
+        assert_eq!(fs::read(manga_dir.join("001.jpg")).unwrap(), b"old");
+        assert_eq!(fs::read(manga_dir.join("001 (1).jpg")).unwrap(), b"new");
+
+        // 非图片整体报错，不产生半途结果
+        let err = copy_images_into_manga(&root, "m1", &[src.join("notes.txt")]);
+        assert!(err.is_err());
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&src).ok();
+    }
+
+    #[test]
+    fn delete_manga_files_skips_traversal_and_missing() {
+        let root = temp_dir("del-pages");
+        let manga_dir = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(manga_dir.join("sub")).unwrap();
+        fs::write(manga_dir.join("001.jpg"), b"1").unwrap();
+        fs::write(manga_dir.join("sub/002.jpg"), b"2").unwrap();
+        // 目录外的文件，穿越删除必须被拒绝
+        fs::write(root.join("secret.txt"), b"s").unwrap();
+
+        let removed = delete_manga_files(
+            &root,
+            "m1",
+            &[
+                "001.jpg".to_string(),
+                "sub/002.jpg".to_string(),
+                "不存在.jpg".to_string(),
+                "../secret.txt".to_string(),
+            ],
+        );
+        assert_eq!(removed, 2);
+        assert!(!manga_dir.join("001.jpg").exists());
+        assert!(!manga_dir.join("sub/002.jpg").exists());
+        assert!(root.join("secret.txt").exists());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn same_page_set_ignores_order_but_not_membership() {
+        let a = vec!["1.jpg".to_string(), "2.jpg".to_string()];
+        assert!(same_page_set(&a, &["2.jpg".into(), "1.jpg".into()]));
+        // 多一页 / 少一页 / 换一页都不算同一集合
+        assert!(!same_page_set(&a, &["1.jpg".into(), "2.jpg".into(), "3.jpg".into()]));
+        assert!(!same_page_set(&a, &["1.jpg".into()]));
+        assert!(!same_page_set(&a, &["1.jpg".into(), "3.jpg".into()]));
     }
 }

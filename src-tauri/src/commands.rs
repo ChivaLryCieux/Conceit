@@ -1,11 +1,12 @@
 //! Tauri 命令层：书库快照、文件夹、重命名、删除、移动、排序与阅读进度。
 
 use crate::library::{
-    copy_dir_all, extract_zip, make_cover_thumb, now_unix, scan_images, title_from_path, Item,
-    ItemKind, LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
+    copy_dir_all, copy_images_into_manga, delete_manga_files, extract_zip, make_cover_thumb,
+    now_unix, remove_cover_thumb, same_page_set, scan_images, title_from_path, Item, ItemKind,
+    LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
@@ -397,4 +398,133 @@ pub fn import_sources(
     }
     st.save()?;
     Ok(imported)
+}
+
+/// 给漫画追加图片：复制进书库并排在 `pages` 末尾，返回更新后的条目。
+///
+/// 新页面刻意不插队——追加后用户在设置里拖动即可归位，
+/// 这样不会打乱已经自定义过的顺序。
+#[tauri::command]
+pub fn add_manga_pages(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    paths: Vec<String>,
+) -> Result<Item, String> {
+    let root = lock(&state)?.root.clone();
+    let mut st = lock(&state)?;
+    match st.index.item(&id) {
+        Some(item) if item.manga.is_some() => {}
+        Some(_) => return Err("该条目不是漫画".to_string()),
+        None => return Err("条目不存在".to_string()),
+    }
+    if paths.is_empty() {
+        return Err("没有选择要添加的图片".to_string());
+    }
+    let srcs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let added = copy_images_into_manga(&root, &id, &srcs)?;
+    let item = st
+        .index
+        .item_mut(&id)
+        .ok_or_else(|| "条目不存在".to_string())?;
+    let meta = item
+        .manga
+        .as_mut()
+        .ok_or_else(|| "该条目不是漫画".to_string())?;
+    let had_pages = !meta.pages.is_empty();
+    meta.pages.extend(added);
+    // 页数曾被删光的漫画，补图时顺手把封面补回来
+    if !had_pages && meta.cover.is_none() {
+        meta.cover = meta.pages.first().cloned();
+        meta.thumb = meta
+            .cover
+            .as_deref()
+            .and_then(|c| make_cover_thumb(&root, &id, c));
+    }
+    st.save()?;
+    st.index
+        .item(&id)
+        .cloned()
+        .ok_or_else(|| "条目不存在".to_string())
+}
+
+/// 删除漫画中的若干页：索引记录与磁盘文件一并删除，返回更新后的条目。
+///
+/// 封面页被删时自动顺延到当前第一页并重建缩略图；至少保留一页
+/// （要清空请直接删除整部漫画）。
+#[tauri::command]
+pub fn delete_manga_pages(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    pages: Vec<String>,
+) -> Result<Item, String> {
+    let root = lock(&state)?.root.clone();
+    let mut st = lock(&state)?;
+    let item = st
+        .index
+        .item_mut(&id)
+        .ok_or_else(|| "条目不存在".to_string())?;
+    let meta = item
+        .manga
+        .as_mut()
+        .ok_or_else(|| "该条目不是漫画".to_string())?;
+    if pages.is_empty() {
+        return Err("没有选择要删除的页面".to_string());
+    }
+    let current: HashSet<&str> = meta.pages.iter().map(|s| s.as_str()).collect();
+    for p in &pages {
+        if !current.contains(p.as_str()) {
+            return Err(format!("页面不存在: {p}"));
+        }
+    }
+    if meta.pages.len() <= pages.len() {
+        return Err("至少需要保留一页图片".to_string());
+    }
+    let deleted: HashSet<String> = pages.into_iter().collect();
+    let deleted_list: Vec<String> = deleted.iter().cloned().collect();
+    delete_manga_files(&root, &id, &deleted_list);
+    meta.pages.retain(|p| !deleted.contains(p));
+    // 封面页被删 → 顺延到当前第一页，缩略图跟着重建
+    if meta.cover.as_ref().is_some_and(|c| deleted.contains(c)) {
+        meta.cover = meta.pages.first().cloned();
+        meta.thumb = match meta.cover.as_deref() {
+            Some(c) => make_cover_thumb(&root, &id, c),
+            None => {
+                remove_cover_thumb(&root, &id);
+                None
+            }
+        };
+    }
+    st.save()?;
+    st.index
+        .item(&id)
+        .cloned()
+        .ok_or_else(|| "条目不存在".to_string())
+}
+
+/// 自定义漫画图片顺序：提交的必须与当前是同一组图片（顺序不同），
+/// 返回更新后的条目。集合不一致说明前端状态过期，直接报错让其刷新。
+#[tauri::command]
+pub fn reorder_manga_pages(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    pages: Vec<String>,
+) -> Result<Item, String> {
+    let mut st = lock(&state)?;
+    let item = st
+        .index
+        .item_mut(&id)
+        .ok_or_else(|| "条目不存在".to_string())?;
+    let meta = item
+        .manga
+        .as_mut()
+        .ok_or_else(|| "该条目不是漫画".to_string())?;
+    if !same_page_set(&meta.pages, &pages) {
+        return Err("图片集合与当前不一致，无法保存顺序".to_string());
+    }
+    meta.pages = pages;
+    st.save()?;
+    st.index
+        .item(&id)
+        .cloned()
+        .ok_or_else(|| "条目不存在".to_string())
 }
