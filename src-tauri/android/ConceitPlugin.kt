@@ -78,7 +78,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
           copyUriToFile(uri, dir, ensureZipExtension = true)
         }
         resolveOnUi(invoke) { pathsResponse(paths) }
-      } catch (e: Exception) {
+      } catch (e: Throwable) {
         rejectOnUi(invoke, e.message ?: "读取所选文件失败")
       }
     }.start()
@@ -119,7 +119,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
           copyUriToFile(uri, dir, ensureZipExtension = false)
         }
         resolveOnUi(invoke) { pathsResponse(paths) }
-      } catch (e: Exception) {
+      } catch (e: Throwable) {
         rejectOnUi(invoke, e.message ?: "读取所选图片失败")
       }
     }.start()
@@ -150,9 +150,26 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         // 目录名取自所选文件夹的显示名，导入后的漫画标题才有意义
         val dest = File(prepareDir("tree-import", wipe = true), treeDisplayName(treeUri))
         dest.mkdirs()
+        // 安卓导入是「SAF 拷进缓存 + Rust 再拷进书库」两份占用，拷到一半
+        // 空间不足只会得到一条错误、白等几分钟。先按目录总大小预估，不够
+        // 就提前拒绝；提供者不给文件大小时放弃预估、照常导入。
+        val total = treeTotalSize(treeUri)
+        if (total != null) {
+          val usable = activity.cacheDir.usableSpace
+          val need = total * 2 + 64L * 1024 * 1024
+          if (usable < need) {
+            rejectOnUi(
+              invoke,
+              "存储空间不足：导入约需 ${need / 1024 / 1024}MB，当前可用 ${usable / 1024 / 1024}MB"
+            )
+            return@Thread
+          }
+        }
         copyTree(treeUri, dest)
         resolveOnUi(invoke) { JSObject().put("path", dest.absolutePath) }
-      } catch (e: Exception) {
+      } catch (e: Throwable) {
+        // Throwable 而非 Exception：OOM、StackOverflowError 也要能转成一条
+        // 错误提示，而不是未捕获异常直接杀掉进程（用户看到的就是闪退）
         rejectOnUi(invoke, e.message ?: "读取所选目录失败")
       }
     }.start()
@@ -167,7 +184,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         File(activity.cacheDir, "tree-import").deleteRecursively()
         File(activity.cacheDir, "picked-images").deleteRecursively()
         resolveOnUi(invoke) { JSObject().put("cleared", true) }
-      } catch (e: Exception) {
+      } catch (e: Throwable) {
         rejectOnUi(invoke, e.message ?: "清理导入缓存失败")
       }
     }.start()
@@ -256,36 +273,68 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     return candidate
   }
 
-  private fun copyTree(treeUri: Uri, dest: File) {
-    val rootId = DocumentsContract.getTreeDocumentId(treeUri)
-    walkTree(treeUri, DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, rootId), dest)
-  }
-
-  private fun walkTree(treeUri: Uri, childrenUri: Uri, dest: File) {
-    val projection = arrayOf(
-      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-      DocumentsContract.Document.COLUMN_MIME_TYPE,
-      DocumentsContract.Document.COLUMN_DISPLAY_NAME
+  /** 深度优先遍历 SAF 目录树。
+   *
+   * 用显式栈而非递归：深层目录树会把线程栈爆掉，而 StackOverflowError 不是
+   * Exception、catch 不住，未捕获的 Error 会直接让进程闪退。
+   * visitDir 决定子目录对应的本地目录（大小预估时可原样透传、不建目录），
+   * onFile 对每个文件回调（size = null 表示提供者不给出文件大小）。 */
+  private inline fun walkTree(
+    treeUri: Uri,
+    dest: File,
+    visitDir: (File, String) -> File = { dir, name -> File(dir, name).also { it.mkdirs() } },
+    onFile: (Uri, File, Long?) -> Unit,
+  ) {
+    val stack = ArrayDeque<Pair<Uri, File>>()
+    stack.addLast(
+      DocumentsContract.buildChildDocumentsUriUsingTree(
+        treeUri,
+        DocumentsContract.getTreeDocumentId(treeUri)
+      ) to dest
     )
-    activity.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-      while (cursor.moveToNext()) {
-        val docId = cursor.getString(0) ?: continue
-        val mime = cursor.getString(1)
-        val name = sanitizeName(cursor.getString(2) ?: docId)
-        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-          val sub = File(dest, name)
-          sub.mkdirs()
-          walkTree(
-            treeUri,
-            DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId),
-            sub
-          )
-        } else {
-          val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-          copyUriToFile(docUri, dest, ensureZipExtension = false)
+    while (stack.isNotEmpty()) {
+      val (childrenUri, dir) = stack.removeLast()
+      activity.contentResolver.query(
+        childrenUri,
+        arrayOf(
+          DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+          DocumentsContract.Document.COLUMN_MIME_TYPE,
+          DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+          DocumentsContract.Document.COLUMN_SIZE
+        ),
+        null, null, null
+      )?.use { cursor ->
+        while (cursor.moveToNext()) {
+          val docId = cursor.getString(0) ?: continue
+          val mime = cursor.getString(1)
+          val name = sanitizeName(cursor.getString(2) ?: docId)
+          if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+            stack.addLast(
+              DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId) to visitDir(dir, name)
+            )
+          } else {
+            val size = if (cursor.isNull(3)) null else cursor.getLong(3)
+            onFile(DocumentsContract.buildDocumentUriUsingTree(treeUri, docId), dir, size)
+          }
         }
       }
     }
+  }
+
+  private fun copyTree(treeUri: Uri, dest: File) {
+    walkTree(treeUri, dest) { docUri, dir, _ ->
+      copyUriToFile(docUri, dir, ensureZipExtension = false)
+    }
+  }
+
+  /** 统计目录树全部文件大小；任一文件大小未知时返回 null（放弃预估、直接放行） */
+  private fun treeTotalSize(treeUri: Uri): Long? {
+    var total = 0L
+    walkTree(treeUri, File("/"), visitDir = { dir, _ -> dir }) { _, _, size ->
+      size ?: return null
+      total += size
+    }
+    return total
   }
 
   private fun treeDisplayName(treeUri: Uri): String {

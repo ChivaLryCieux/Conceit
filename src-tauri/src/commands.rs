@@ -7,7 +7,7 @@ use crate::library::{
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::State;
 
@@ -46,10 +46,29 @@ pub struct Snapshot {
     pub manga_counts: BTreeMap<String, u32>,
 }
 
+/// 取书库状态锁。锁中毒（某线程持锁时 panic 过）时恢复守卫而不是报错：
+/// 所有写操作都是「先改内存、再整体落盘」，中毒不会让状态不可用，
+/// 为一次已兜住的 panic 废掉整个应用不值得。
 fn lock<'a>(
     state: &'a State<'_, Mutex<AppState>>,
 ) -> Result<std::sync::MutexGuard<'a, AppState>, String> {
-    state.inner().lock().map_err(|_| "书库状态锁已中毒".to_string())
+    state
+        .inner()
+        .lock()
+        .or_else(|poisoned| Ok(poisoned.into_inner()))
+}
+
+/// 导入中途失败时清掉半成品目录：解压 / 复制到一半（常见于空间不足）后
+/// 若直接返回错误，垃圾目录会留在书库里白占空间。
+fn cleanup_partial_import(dest: &Path) {
+    if dest.exists() {
+        if let Err(e) = std::fs::remove_dir_all(dest) {
+            eprintln!(
+                "清理半成品导入目录失败 {}: {e}",
+                dest.display()
+            );
+        }
+    }
 }
 
 /// 读取整个书架
@@ -366,9 +385,13 @@ pub fn import_sources(
         let dest = st.root.join(&rel_dir);
 
         if is_zip {
-            extract_zip(&src, &dest)?;
-        } else {
-            copy_dir_all(&src, &dest)?;
+            if let Err(e) = extract_zip(&src, &dest) {
+                cleanup_partial_import(&dest);
+                return Err(e);
+            }
+        } else if let Err(e) = copy_dir_all(&src, &dest) {
+            cleanup_partial_import(&dest);
+            return Err(e);
         }
 
         let pages = scan_images(&dest);

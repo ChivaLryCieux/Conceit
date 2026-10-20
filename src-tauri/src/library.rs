@@ -19,6 +19,15 @@ pub const THUMB_DIR_NAME: &str = "thumbs";
 pub const THUMB_MAX_EDGE: u32 = 480;
 /// 缩略图 JPEG 质量
 pub const THUMB_QUALITY: u8 = 80;
+/// 解码单张封面的内存预算（字节）。
+///
+/// 扫描漫画封面动辄 3000×4500（RGB 约 40MB），高清跨页能到 6000×9000
+/// （162MB）甚至更大；`image::open` 不设上限，文件头写多大就分配多大。
+/// 安卓单进程内存上限常见 256~512MB 且还要分给 WebView，一次这样的分配
+/// 就会触发 lmkd 杀进程（或 Rust 分配失败 abort）——表现为导入时静默闪退。
+/// 超过预算的封面放弃缩略图、书架回退原图（Chromium 给小尺寸 `<img>`
+/// 做硬件解码 + 降采样，比在这里全幅解码安全得多）。
+pub const THUMB_MAX_DECODE_BYTES: u64 = 96 * 1024 * 1024;
 
 /// 支持的图片扩展名（小写判断）
 pub const IMAGE_EXTENSIONS: [&str; 7] = ["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"];
@@ -270,16 +279,47 @@ impl LibraryIndex {
     }
 }
 
+/// 在内存预算内解码一张图片；超预算、格式不支持或解码器内部 panic 时返回 None。
+///
+/// 两个防护缺一不可：
+/// - `Limits::max_allocation` 让 image 在**分配前**按文件头尺寸拒绝超大图
+///   （见 image 0.25 `ImageReader::decode` 里的 `limits.reserve(total_bytes)`），
+///   把「OOM 杀进程」降级成一次普通的解码失败；
+/// - `catch_unwind` 兜住各解码器对畸形文件残留的 panic 路径——release 下
+///   panic 会直接终止整个进程，而缩略图失败本该只是回退原图。
+/// （前提是 Cargo.toml 不能用 `panic = "abort"`，否则 catch_unwind 不生效。）
+fn decode_within_budget(path: &Path, budget: u64) -> Option<image::DynamicImage> {
+    let decoded = std::panic::catch_unwind(|| {
+        // image 默认只带 512MB 的总分配上限，远高于安卓单进程预算，
+        // 这里按预算显式调低；超限时 decode() 在分配前就返回 Limits 错误
+        let mut limits = image::Limits::default();
+        limits.max_alloc = Some(budget);
+        let mut reader = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?;
+        reader.limits(limits);
+        reader.decode().ok()
+    });
+    match decoded {
+        Ok(img) => img,
+        Err(_) => {
+            eprintln!(
+                "解码图片时解码器内部 panic（已忽略，封面将回退原图）: {}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
 /// 为漫画封面生成缩略图，返回相对书库根目录的路径（如 `thumbs/m1.jpg`）。
 ///
 /// 书架封面只有一百多像素宽，直接加载原图会迫使 WebView 解码整张大图
 /// （扫描漫画常见 3000×4500、单文件数 MB）；这里在导入时预生成一份小图，
 /// 阅读时仍加载原图，画质不受影响。
-/// 原图本身不大于阈值、或解码失败时返回 None，调用方回退到原图封面。
+/// 原图本身不大于阈值、解码失败（含超出内存预算）时返回 None，调用方回退到原图封面。
 /// 注意：输出为 JPEG，不带透明通道（漫画封面基本不涉及透明）。
 pub fn make_cover_thumb(root: &Path, id: &str, cover_rel: &str) -> Option<String> {
     let src = root.join(MANGA_DIR_NAME).join(id).join(cover_rel);
-    let img = image::open(&src).ok()?;
+    let img = decode_within_budget(&src, THUMB_MAX_DECODE_BYTES)?;
     let (w, h) = (img.width(), img.height());
     let longest = w.max(h);
     if longest <= THUMB_MAX_EDGE {
@@ -514,8 +554,27 @@ pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 从 zip 压缩包中解压出图片内容
+/// 从 zip 压缩包中解压出图片内容。
+///
+/// 整个解压包一层 `catch_unwind`：zip crate 对畸形压缩包的解析存在 panic
+/// 路径，release 下 panic 会直接终止进程（表现为导入即闪退）。这里把它
+/// 降级成一条普通错误，交由导入方报错并清理半成品目录。
 pub fn extract_zip(src: &Path, dst: &Path) -> Result<(), String> {
+    let src = src.to_path_buf();
+    let dst = dst.to_path_buf();
+    match std::panic::catch_unwind({
+        let src = src.clone();
+        move || extract_zip_inner(&src, &dst)
+    }) {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "解压 zip 时内部 panic（压缩包可能已损坏）: {}",
+            src.display()
+        )),
+    }
+}
+
+fn extract_zip_inner(src: &Path, dst: &Path) -> Result<(), String> {
     let file = fs::File::open(src).map_err(|e| format!("打开 zip 失败 {}: {e}", src.display()))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {e}"))?;
     for i in 0..archive.len() {
@@ -756,6 +815,39 @@ mod tests {
 
         // 删除不存在的缩略图不应报错
         remove_cover_thumb(&root, "m1");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn decode_within_budget_guards_memory_and_bad_input() {
+        let root = temp_dir("decode-budget");
+        let src = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(&src).unwrap();
+        image::RgbImage::from_pixel(600, 900, image::Rgb([200, 60, 60]))
+            .save(src.join("001.png"))
+            .unwrap();
+
+        // 预算充足 → 正常解出
+        assert!(decode_within_budget(&src.join("001.png"), 64 * 1024 * 1024).is_some());
+        // 预算不足（连 600x900 都装不下）→ 优雅返回 None，而不是 OOM 杀进程
+        assert!(decode_within_budget(&src.join("001.png"), 1024).is_none());
+
+        // 畸形 / 非图片文件：解码失败或被解码器内部 panic 都兜住，返回 None
+        fs::write(src.join("broken.png"), b"\x89PNG\r\n\x1a\n not a real png").unwrap();
+        assert!(decode_within_budget(&src.join("broken.png"), 64 * 1024 * 1024).is_none());
+        fs::write(src.join("garbage.bin"), b"\x00\x01\x02\x03").unwrap();
+        assert!(decode_within_budget(&src.join("garbage.bin"), 64 * 1024 * 1024).is_none());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn extract_zip_rejects_corrupt_archive_without_crashing() {
+        let root = temp_dir("zip-broken");
+        let src = root.join("broken.zip");
+        // 只有 zip 魔数的残片：解析必须返回错误而不是 panic 杀进程
+        fs::write(&src, b"PK\x03\x04 not really a zip").unwrap();
+        assert!(extract_zip(&src, &root.join("out")).is_err());
         fs::remove_dir_all(&root).ok();
     }
 

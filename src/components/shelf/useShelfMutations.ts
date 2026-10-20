@@ -48,8 +48,14 @@ export function useShelfMutations({
         // std::fs 用不了——走内置原生桥，直接拿到缓存里的真实路径
         // （见 src-tauri/src/mobile_import.rs 与 src-tauri/android/ConceitPlugin.kt）
         if (kind === "dir") {
+          // 选完目录后原生侧要先统计总大小做空间预估，可能有几秒等待，
+          // 先把遮罩挂上；不清 busy 直接进入「正在导入」，避免闪烁
+          setBusy("正在读取所选目录…");
           const dir = await pickDirectory();
-          if (!dir) return; // 用户取消
+          if (!dir) {
+            setBusy(null);
+            return; // 用户取消
+          }
           paths = [dir];
         } else {
           paths = await pickZipFiles();
@@ -89,7 +95,8 @@ export function useShelfMutations({
         }
       }
     } catch (e) {
-      onToast(`打开选择对话框失败：${e}`, "error");
+      // 覆盖对话框打开失败与原生侧读取失败（空间不足、SAF 提供器报错等）
+      onToast(`读取所选内容失败：${e}`, "error");
     }
   }
 

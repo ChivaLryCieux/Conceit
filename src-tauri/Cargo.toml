@@ -28,7 +28,8 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 
 [profile.release]
-panic = "abort"
+# 不用 panic = "abort"：解码 / 解压路径靠 catch_unwind 把库内 panic
+# 降级成单部漫画的导入失败，abort 会让 catch_unwind 失效、进程直接被杀
 codegen-units = 1
 lto = true
 opt-level = "s"
