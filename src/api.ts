@@ -113,6 +113,29 @@ export async function systemBarInsets(): Promise<{ top: number; bottom: number }
   return invoke("system_bar_insets");
 }
 
+/** 打开系统图片选择器（安卓可多选），返回缓存中的真实路径；取消返回空列表 */
+export async function pickImages(): Promise<string[]> {
+  return invoke<string[]>("pick_images");
+}
+
+/* ---------- 漫画图片管理（设置页） ---------- */
+
+/** 给漫画追加图片：复制进书库并排在末尾，返回更新后的条目 */
+export async function addMangaPages(id: string, paths: string[]): Promise<Item> {
+  return invoke<Item>("add_manga_pages", { id, paths });
+}
+
+/** 删除漫画中的若干页（文件一并删除），返回更新后的条目；
+ *  封面页被删时会自动顺延，需要从返回值同步封面状态 */
+export async function deleteMangaPages(id: string, pages: string[]): Promise<Item> {
+  return invoke<Item>("delete_manga_pages", { id, pages });
+}
+
+/** 自定义漫画图片顺序，返回更新后的条目 */
+export async function reorderMangaPages(id: string, pages: string[]): Promise<Item> {
+  return invoke<Item>("reorder_manga_pages", { id, pages });
+}
+
 /** 某个容器（root 或文件夹）下按排序排列的条目 */
 export function childrenOf(
   index: LibraryIndex,

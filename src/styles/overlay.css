@@ -276,3 +276,95 @@
   background: var(--accent);
   color: #fff;
 }
+
+/* ---------- 漫画图片管理（设置页） ---------- */
+
+.pages-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pages-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pages-section-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 缩略图外包一层：删除按钮作为兄弟节点，避免按钮嵌套按钮 */
+.page-thumb-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.page-thumb {
+  width: 100%;
+}
+
+.page-thumb-delete {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.page-thumb-delete:hover {
+  opacity: 1;
+  background: var(--danger);
+}
+
+/* 待删除：红边框 + 图片压暗 */
+.page-thumb-pending {
+  border-color: var(--danger);
+}
+
+.page-thumb-pending img {
+  opacity: 0.45;
+}
+
+.page-thumb-badge-danger {
+  background: var(--danger);
+}
+
+/* 拖动排序：源图半透明，落点用左右边框指示 */
+.page-thumb-dragging {
+  opacity: 0.35;
+}
+
+.page-thumb-drop-before {
+  border-left-color: var(--accent);
+}
+
+.page-thumb-drop-after {
+  border-right-color: var(--accent);
+}
+
+/* 触屏拖动时跟随手指的浮动缩略图 */
+.page-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 200;
+  pointer-events: none;
+  opacity: 0.92;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+}

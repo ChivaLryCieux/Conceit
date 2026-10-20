@@ -273,6 +273,13 @@
     max-height: 46vh;
   }
 
+  /* 触屏上删除标记的靶子大一点 */
+  .page-thumb-delete {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+  }
+
   .toast {
     max-width: 86vw;
   }

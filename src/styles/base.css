@@ -104,6 +104,32 @@ button {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
+
+/* 危险操作（删除等） */
+.btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: #ea8080;
+  border-color: #ea8080;
+}
+
+/* 低调的次要操作（取消选择等）：无底色，仅文字 */
+.btn-quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+
+.btn-quiet:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--text);
+}
+
 @keyframes pop-in {
   from {
     opacity: 0;
