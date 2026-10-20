@@ -4,9 +4,9 @@
 
 ## 功能特性
 
-- **书架主页**：漫画与文件夹以封面网格陈列，像书架一样一目了然；面包屑导航进入 / 返回文件夹
+- **书架主页**：漫画与文件夹以封面网格陈列，像书架一样一目了然；面包屑导航进入 / 返回文件夹；导入 / 新建 / 导航功能栏固定底部（平板与手机上拇指更好够到，顶部也不被状态栏占掉一块）
 - **自由排序**：拖拽卡片调整顺序（带前 / 后插入线指示），拖到文件夹卡片即移入该文件夹，拖到面包屑可移动到任意层级；排序写入 `index.json`，重启后保持
-- **条目设置**：每个漫画 / 文件夹名称右侧设有设置按钮，可修改名称、开关封面展示（默认纯色封面）、选择漫画任意一页作为封面
+- **条目设置**：每个漫画 / 文件夹名称右侧设有设置按钮，可修改名称、开关封面展示（默认纯色封面）、选择漫画任意一页作为封面；漫画还能**增加图片**（多选，追加到末尾）、**删除图片**（✕ 标记后统一确认）与**拖动调整图片顺序**
 - **连续阅读**：打开漫画后，文件夹中的图片竖向拼接，滚轮 / 方向键 / 进度滑块上下滑动连续阅读；默认宽度填充整个屏幕，可缩放（50% – 300%）
 - **阅读浮窗**：点击画面显隐唯一的底部工具栏——退出阅读、漫画名称、缩放控制、进度滑块、页码与百分比；工具栏是浮层，隐藏时漫画完全铺满竖直方向，顶部不留黑边。放在底部是为了避开手机状态栏、减少误触
 - **多种缩放方式**：底栏内点击 `− 百分比 +` 逐档缩放、点百分比复位；按住 **Ctrl 滚动滚轮**（触控板捏合同效）即可平滑缩放，缩放时自动显出工具栏显示当前比例
@@ -60,13 +60,14 @@ pnpm tauri build   # 打包发布版
 
 | 维度 | 适配内容 |
 | --- | --- |
-| 布局 | 断点 1024 / 640 / 380px；书架卡片网格自动 2–5 列；头部品牌与操作按钮在窄屏分行，面包屑可横向滚动 |
+| 布局 | 断点 1024 / 640 / 380px；书架卡片网格自动 2–5 列；功能栏固定底部，窄屏分两行（品牌 + 面包屑 / 操作按钮），面包屑可横向滚动 |
 | 触屏 | 设置按钮常显（桌面为 hover 显现）；去掉 hover 粘滞效果，改用按压缩放反馈；按钮点击目标加大 |
 | 手势 | 长按卡片打开操作菜单（等价于桌面右键）；长按后拖动即可排序，浮动卡片跟随手指，落到文件夹上为移入；捏合 / Ctrl+滚轮缩放漫画 |
 | 系统返回 | 硬件返回键与边缘滑动手势由 `MainActivity` 拦截并转交前端：阅读器→书架、文件夹逐级返回、根目录才退出；模态框 / 操作菜单优先消费 |
 | 阅读器 | 底部工具栏在窄屏自动两行排布；漫画始终铺满屏幕；工具栏显隐不影响内容位置 |
 | 弹窗 | 手机上模态框变为底部弹出面板，内部滚动，避让 Home 指示条 |
-| 安全区 | 状态栏 / 导航栏高度经原生桥同步为 CSS 变量（安卓 WebView 的 `env(safe-area-inset-*)` 部分设备取不到值），顶栏、工具栏、提示条、Toast 与弹窗均已避让 |
+| 条目设置 | 缩略图网格支持点选封面、✕ 标记删除（可撤销）、鼠标拖放 / 触屏长按拖动排序；手机上删除靶子加大到 24px |
+| 安全区 | 状态栏 / 导航栏高度经原生桥同步为 CSS 变量（安卓 WebView 的 `env(safe-area-inset-*)` 部分设备取不到值），底部功能栏、工具栏、提示条、Toast 与弹窗均已避让 |
 | 视口 | `viewport-fit=cover` + 禁用页面缩放（缩放由应用内部控制） |
 
 书库路径使用 Tauri 跨平台的 `app_data_dir()`，Android / iOS 上会自动落到应用私有目录，无需改动。
@@ -130,8 +131,9 @@ node scripts/build-android.mjs              # 完整流程：前端 -> Rust -> �
 node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
 ```
 
-脚本在调用 Gradle 前会把 `src-tauri/android/*.kt`（应用自有的 Kotlin 源码，
-目前为原生桥 `ConceitPlugin.kt`）同步进 `gen/android/app/src/main/java/`，
+脚本在调用 Gradle 前会把 `src-tauri/android/*.kt`（应用自有的 Kotlin 源码——
+原生桥 `ConceitPlugin.kt` 与拦截系统返回的 `MainActivity.kt`）同步进
+`gen/android/app/src/main/java/`，
 因此执行过 `tauri android init` 重建工程后也无需手动拷贝。
 
 Gradle 的原始产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`，
@@ -202,29 +204,32 @@ src/                         前端（React 18 + Vite 5 + TypeScript 严格模�
 ├── App.tsx                  应用状态：书架 / 阅读器切换、文件夹栈、拖拽导入、Toast
 ├── api.ts                   对 Rust 命令的封装 + 书架条目排序
 ├── types.ts                 与 Rust 数据模型一一对应的类型（含 Toast）
+├── backHandler.ts           系统返回处理栈（模态框 / 阅读器按注册顺序消费）
+├── usePageSorting.ts        漫画图片排序：鼠标拖放 + 触屏长按拖动
+├── useSystemBarInsets.ts    系统栏高度 → CSS 变量（安卓原生桥）
 ├── styles/                  样式，按关注点拆分，由 index.css 统一引入
 │   ├── base.css             变量、重置、应用外壳、按钮、通用动画、滚动条
-│   ├── shelf.css            书架：品牌区、面包屑、卡片网格、条目卡片、右键菜单
+│   ├── shelf.css            书架：底部功能栏、面包屑、卡片网格、条目卡片、右键菜单
 │   ├── reader.css           阅读器：浮层底栏、缩放控件、进度滑块、滚动区
-│   ├── overlay.css          忙碌遮罩、Toast、模态弹窗、表单、封面选页
+│   ├── overlay.css          忙碌遮罩、Toast、模态弹窗、表单、封面选页与图片管理
 │   └── mobile.css           移动端 / 触屏适配（断点与 hover:none）
 ├── components/
 │   ├── shelf/               书架功能域
 │   │   ├── Shelf.tsx        编排：状态、弹窗、网格渲染
-│   │   ├── ShelfHeader.tsx  品牌区 + 面包屑 + 操作按钮
+│   │   ├── ShelfHeader.tsx  底部功能栏：品牌 + 面包屑 + 操作按钮
 │   │   ├── Card.tsx         漫画 / 文件夹卡片（封面 / 纯色封面、进度条、设置按钮）
 │   │   ├── useShelfMutations.ts  导入 / 新建 / 删除 / 移动
 │   │   └── useItemSorting.ts     鼠标拖放 + 触屏长按排序（共用落点计算）
 │   ├── reader/              阅读器功能域
 │   │   ├── Reader.tsx       图片加载、进度恢复与保存、缩放、键盘操作
 │   │   └── ReaderBottombar.tsx  唯一底栏（退出 / 标题 / 缩放 / 进度滑块 / 计数）
-│   ├── ItemSettings.tsx     条目设置（名称 / 封面开关 / 封面页选择）
+│   ├── ItemSettings.tsx     条目设置（名称 / 封面开关 / 封面页选择 / 图片增删与排序）
 │   └── ui/                  通用组件：Modal、InputDialog、ContextMenu、icons
 
 src-tauri/                   后端（Rust + Tauri 2）
-├── src/library.rs           书库模型：索引持久化、自然排序、目录复制、zip 解压、漫画数量统计、封面缩略图生成
-├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入）
-├── src/mobile_import.rs     Android 原生桥（SAF 目录 / zip 选择等，桌面端为存根）
+├── src/library.rs           书库模型：索引持久化、自然排序、目录复制、zip 解压、漫画数量统计、封面缩略图生成、图片增删辅助函数
+├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入 / 漫画图片管理）
+├── src/mobile_import.rs     Android 原生桥（SAF 目录 / zip / 图片选择等，桌面端为存根）
 ├── android/ConceitPlugin.kt Android 原生桥的 Kotlin 实现（构建时同步进 gen/android）
 ├── android/MainActivity.kt  主 Activity：拦截系统返回转交前端（构建时同步进 gen/android）
 └── tauri.conf.json          桌面配置（asset 协议加载本地图片）
@@ -245,6 +250,9 @@ Android 上 `tauri-plugin-dialog` 有两个硬伤，直接用会报错：
 复制时保留原始名称，导入后的漫画标题仍然是有意义的文件夹名 / 压缩包名；
 整棵目录树的复制放在后台线程执行，避免主线程 ANR。前端通过 `app_platform` 命令
 区分平台：桌面走插件对话框，Android 走原生桥。
+设置页的「增加图片」多选走同一个插件的 `pickImages`（`ACTION_OPEN_DOCUMENT` +
+`image/*` 多选），复制进 `picked-images` 缓存目录，由 `add_manga_pages`
+复制进书库后随 `clear_import_cache` 一并清理。
 
 > Kotlin 源码的规范副本在 `src-tauri/android/`，`scripts/build-android.mjs` 每次构建前
 > 会把它同步进 `gen/android/app/src/main/java/com/conceit/mangareader/`
@@ -270,6 +278,23 @@ Activity——在阅读器里划边缘返回也会退出应用。拦截后把系
 `useSystemBarInsets` 在启动与每次 `resize`（旋屏、折叠屏形态切换——Activity 声明了
 `configChanges`，页面不重载）后把它同步为 `--status-bar-h` / `--nav-bar-h` 两个
 CSS 变量；`:root` 里的默认值仍取 `env()`，桌面 / iOS 行为不变。
+书架功能栏固定底部后，顶部不再为状态栏留白，网格直接顶到屏幕边缘。
+
+### 漫画图片管理
+
+条目设置（`src/components/ItemSettings.tsx`）里，漫画的缩略图网格同时承担三件事：
+点一下设为封面、点右上角 ✕ 标记删除、拖动调整顺序。对应三条 Rust 命令：
+
+| 命令 | 行为 |
+|---|---|
+| `add_manga_pages` | 把所选图片复制进 `library/manga/<id>/`（重名自动加序号），**追加到 `pages` 末尾**——刻意不插队，追加后拖动归位即可，不会打乱已自定义的顺序 |
+| `delete_manga_pages` | 索引与磁盘文件一并删除；封面页被删时顺延到当前第一页并重建缩略图；**至少保留一页**（要清空请直接删除整部漫画） |
+| `reorder_manga_pages` | 提交的必须与当前是同一组图片（`same_page_set` 校验），防止把增删伪装成重排传进来 |
+
+删除是「先标记、后统一确认」的两步操作：✕ 标记后缩略图变红并显示「待删除」，
+section 头部出现「删除所选 N 页」，再点一次确认才真正删文件，防误触。
+排序用 `src/usePageSorting.ts`（鼠标 HTML5 拖放 + 触屏长按拖动，与书架排序同一套手势），
+先本地生效，保存失败自动回滚。
 
 ### 实现要点
 
@@ -286,6 +311,10 @@ CSS 变量；`:root` 里的默认值仍取 `env()`，桌面 / iOS 行为不变�
   根目录才退出；弹窗经返回处理栈优先消费（详见上文）
 - **系统栏避让**：状态栏 / 导航栏高度经原生桥同步为 CSS 变量，兜底 WebView
   `env(safe-area-inset-*)` 在部分安卓设备上取不到值的问题（详见上文）
+- **书架功能栏贴底**：导入 / 新建 / 面包屑移到屏幕底部，平板与手机上拇指更好够到，
+  顶部不再为状态栏留白（详见上文）
+- **漫画图片管理**：设置页可增加 / 删除图片与拖动排序，追加不插队、删除两步确认、
+  封面页被删自动顺延（详见上文）
 - **Android 打包**：`tauri android build` 在 Windows 上受符号链接权限所限，改用
   `scripts/build-android.mjs`（文件复制 + 直接调 Gradle），签名走 `keystore.properties`
 
