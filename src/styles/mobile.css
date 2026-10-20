@@ -121,28 +121,30 @@
 @media (max-width: 640px) {
   .shelf-header {
     gap: 10px;
-    padding: calc(10px + var(--status-bar-h)) 12px 10px;
+    padding: 10px 12px calc(10px + var(--nav-bar-h));
   }
 
-  /* 第一行：品牌 + 操作；第二行：面包屑（可横向滚动） */
+  /* 底部功能栏两行：第一行 品牌 + 面包屑（可横向滚动），第二行 操作按钮（贴底） */
   .shelf-brand {
-    flex: 1;
-    min-width: 0;
+    flex: 0 0 auto;
   }
 
   .brand-name {
     font-size: 15px;
   }
 
+  /* 窄屏隐藏 "Conceit" 角标，把宽度让给面包屑 */
+  .brand-sub {
+    display: none;
+  }
+
   .crumbs {
-    order: 3;
-    flex-basis: 100%;
+    flex: 1;
     min-width: 0;
     padding-bottom: 2px;
   }
 
   .shelf-actions {
-    order: 2;
     flex-basis: 100%;
   }
 

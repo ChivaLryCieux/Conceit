@@ -8,14 +8,17 @@
   min-height: 0;
 }
 
+/* 功能栏固定底部：平板 / 手机上拇指更好够到；顶部不再为状态栏留白，
+   网格直接顶到屏幕边缘（与改动前「轻微重合」的观感一致） */
 .shelf-header {
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: calc(12px + var(--status-bar-h)) 22px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 22px calc(10px + var(--nav-bar-h));
+  border-top: 1px solid var(--border);
   background: var(--bg-soft);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .shelf-brand {

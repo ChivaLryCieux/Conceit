@@ -21,7 +21,7 @@ interface Props {
   onImport: (paths: string[]) => Promise<Item[]>;
 }
 
-/** 书架主页：品牌区 + 面包屑 + 卡片网格，负责把各模块组合起来 */
+/** 书架主页：底部功能栏 + 面包屑 + 卡片网格，负责把各模块组合起来 */
 export default function Shelf({
   snapshot,
   currentFolder,
@@ -100,18 +100,6 @@ export default function Shelf({
 
   return (
     <div className="shelf">
-      <ShelfHeader
-        breadcrumbs={breadcrumbs}
-        crumbOver={crumbOver}
-        onNavigateDepth={onNavigateDepth}
-        onImportDir={() => void pickAndImport("dir")}
-        onImportZip={() => void pickAndImport("zip")}
-        onCreateFolder={() => setFolderDialog(true)}
-        onCrumbDragOver={handlers.onCrumbDragOver}
-        onCrumbDragLeave={handlers.onCrumbDragLeave}
-        onCrumbDrop={handlers.onCrumbDrop}
-      />
-
       {items.length === 0 ? (
         <div className="shelf-empty">
           <p className="shelf-empty-title">这个书架还空着</p>
@@ -161,6 +149,19 @@ export default function Shelf({
           {dragId && over.id === null && <div className="drop-endline" />}
         </div>
       )}
+
+      {/* 功能栏放底部：平板 / 手机上拇指更好够到，顶部也不再被状态栏占掉一块 */}
+      <ShelfHeader
+        breadcrumbs={breadcrumbs}
+        crumbOver={crumbOver}
+        onNavigateDepth={onNavigateDepth}
+        onImportDir={() => void pickAndImport("dir")}
+        onImportZip={() => void pickAndImport("zip")}
+        onCreateFolder={() => setFolderDialog(true)}
+        onCrumbDragOver={handlers.onCrumbDragOver}
+        onCrumbDragLeave={handlers.onCrumbDragLeave}
+        onCrumbDrop={handlers.onCrumbDrop}
+      />
 
       {menu && (
         <ContextMenu
