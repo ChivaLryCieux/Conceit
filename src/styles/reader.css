@@ -117,6 +117,22 @@
   align-items: flex-start;
 }
 
+/* 懒加载窗口化：视口之外的页不挂 <img>，用等高的占位块撑出滚动高度，
+   占位高度 = 该页实测高度或估计值，滚动条长度与进度比例因此不受影响 */
+.reader-spacer {
+  flex-shrink: 0;
+  width: 100%;
+}
+
+/* 每页一个槽位：高度由实测/估计值固定，图片加载完后高度即被实测值接管 */
+.reader-page-slot {
+  flex-shrink: 0;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #15161c;
+}
+
 .reader-page {
   display: block;
   height: auto;

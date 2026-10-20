@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { fetchPages, saveProgress } from "../../api";
 import { useBackHandler } from "../../backHandler";
 import ReaderBottombar from "./ReaderBottombar";
+import { useReaderWindow } from "./useReaderWindow";
 import type { Item, Toast } from "../../types";
 
 interface Props {
@@ -18,22 +19,18 @@ function clampZoom(z: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
 }
 
-/** 阅读器：竖向拼接图片上下滑动；点击画面显隐唯一底部框栏 */
+/** 阅读器：竖向拼接图片上下滑动；点击画面显隐唯一底部框栏。
+ *  图片为窗口化懒加载：只有视口附近的几张挂 <img>，其余用等高占位
+ *  撑高度（见 useReaderWindow），数百页的漫画也不会一次性解码全部原图。 */
 export default function Reader({ item, onExit, onToast }: Props) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadedCount, setLoadedCount] = useState(0);
   const [chromeVisible, setChromeVisible] = useState(true);
-  const [current, setCurrent] = useState(1);
-  const [fraction, setFraction] = useState(item.manga?.progress ?? 0);
   /** 缩放比例：1 = 宽度填充整个屏幕 */
   const [zoom, setZoom] = useState(1);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const fractionRef = useRef(item.manga?.progress ?? 0);
-  const lastSaveRef = useRef(0);
-  const restoreDoneRef = useRef(false);
 
   /* ---------- 系统返回（安卓硬件返回键 / 边缘滑动手势）→ 退出阅读 ---------- */
   useBackHandler(() => {
@@ -41,12 +38,10 @@ export default function Reader({ item, onExit, onToast }: Props) {
     return true;
   });
 
-  /* ---------- 加载图片 ---------- */
+  /* ---------- 加载页列表 ---------- */
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    setLoadedCount(0);
-    restoreDoneRef.current = false;
     void fetchPages(item.id)
       .then((list) => {
         if (!alive) return;
@@ -63,54 +58,24 @@ export default function Reader({ item, onExit, onToast }: Props) {
     };
   }, [item.id, onToast]);
 
+  /* ---------- 窗口化懒加载：渲染范围 / 当前页 / 进度 / 缩放换算 ---------- */
+  const win = useReaderWindow({
+    scrollRef,
+    pageCount: pages.length,
+    zoom,
+    progress: item.manga?.progress ?? 0,
+    onSaveProgress: useCallback((f: number) => {
+      void saveProgress(item.id, f).catch(() => {});
+    }, [item.id]),
+  });
+
   /* ---------- 退出时保存进度 ---------- */
   useEffect(() => {
+    const fractionRef = win.fractionRef;
     return () => {
       void saveProgress(item.id, fractionRef.current).catch(() => {});
     };
-  }, [item.id]);
-
-  /* ---------- 滚动：页码、进度、节流保存 ---------- */
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const max = el.scrollHeight - el.clientHeight;
-    const f = max > 0 ? Math.min(1, Math.max(0, el.scrollTop / max)) : 0;
-    fractionRef.current = f;
-    setFraction(f);
-
-    // 当前页码：视口中线之前最后一张图
-    const mid = el.scrollTop + el.clientHeight / 2;
-    const imgs = Array.from(
-      el.querySelectorAll<HTMLImageElement>(".reader-page")
-    );
-    let idx = 0;
-    for (let i = 0; i < imgs.length; i += 1) {
-      if (imgs[i].offsetTop <= mid) idx = i;
-    }
-    setCurrent(Math.min(idx + 1, Math.max(imgs.length, 1)));
-
-    // 节流持久化
-    const now = performance.now();
-    if (now - lastSaveRef.current > 400) {
-      lastSaveRef.current = now;
-      void saveProgress(item.id, f).catch(() => {});
-    }
-  }, [item.id]);
-
-  /* ---------- 恢复上次阅读位置 ---------- */
-  useEffect(() => {
-    if (restoreDoneRef.current || pages.length === 0) return;
-    if (loadedCount < pages.length) return; // 等图片就位，保证滚动高度准确
-    const el = scrollRef.current;
-    if (!el) return;
-    restoreDoneRef.current = true;
-    const p = Math.min(1, Math.max(0, item.manga?.progress ?? 0));
-    if (p <= 0.001) return;
-    const max = el.scrollHeight - el.clientHeight;
-    el.scrollTop = p * max;
-    handleScroll();
-  }, [pages.length, loadedCount, item.manga?.progress, handleScroll]);
+  }, [item.id, win.fractionRef]);
 
   /* ---------- 键盘操作 ---------- */
   useEffect(() => {
@@ -166,13 +131,8 @@ export default function Reader({ item, onExit, onToast }: Props) {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  const jumpTo = (f: number) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: f * (el.scrollHeight - el.clientHeight) });
-  };
-
   const zoomed = zoom > 1.001;
+  const { start, end } = win.range;
 
   return (
     <div className="reader" ref={rootRef}>
@@ -184,18 +144,18 @@ export default function Reader({ item, onExit, onToast }: Props) {
         onZoomIn={() => setZoom((z) => clampZoom(z + 0.1))}
         onZoomOut={() => setZoom((z) => clampZoom(z - 0.1))}
         onZoomReset={() => setZoom(1)}
-        fraction={fraction}
-        current={current}
+        fraction={win.fraction}
+        current={win.current}
         total={pages.length}
         chromeVisible={chromeVisible}
-        onSeek={jumpTo}
+        onSeek={win.jumpTo}
         onExit={onExit}
       />
 
       <div
         className="reader-scroll"
         ref={scrollRef}
-        onScroll={handleScroll}
+        onScroll={win.onScroll}
         onClick={() => setChromeVisible((v) => !v)}
       >
         {loading ? (
@@ -204,25 +164,45 @@ export default function Reader({ item, onExit, onToast }: Props) {
           <div className="reader-loading">这部漫画还没有图片</div>
         ) : (
           <div className={`reader-track${zoomed ? " reader-track-zoomed" : ""}`}>
-            {pages.map((p, i) => (
-              <img
-                key={p}
-                className="reader-page"
-                src={convertFileSrc(p)}
-                alt={`第 ${i + 1} 页`}
-                style={{ width: `${zoom * 100}%` }}
-                draggable={false}
-                onLoad={() => setLoadedCount((c) => c + 1)}
-                onError={() => setLoadedCount((c) => c + 1)}
+            {/* 窗口之外的页不渲染 <img>，用等高占位撑出正确滚动高度 */}
+            {win.spacerTop > 0 && (
+              <div className="reader-spacer" style={{ height: win.spacerTop }} />
+            )}
+            {pages.slice(start, end).map((p, i) => {
+              const index = start + i;
+              return (
+                <div
+                  className="reader-page-slot"
+                  key={p}
+                  style={{ height: win.heights[index] || win.estimate }}
+                >
+                  <img
+                    className="reader-page"
+                    src={convertFileSrc(p)}
+                    alt={`第 ${index + 1} 页`}
+                    style={{ width: `${zoom * 100}%` }}
+                    draggable={false}
+                    onLoad={(e) =>
+                      win.measure(index, e.currentTarget.clientHeight)
+                    }
+                    onError={() => win.measure(index, win.estimate)}
+                  />
+                </div>
+              );
+            })}
+            {win.spacerBottom > 0 && (
+              <div
+                className="reader-spacer"
+                style={{ height: win.spacerBottom }}
               />
-            ))}
+            )}
           </div>
         )}
       </div>
 
       {chromeVisible && pages.length > 0 && (
         <div className="reader-hint">
-          点击画面显隐工具栏 · Ctrl+滚轮缩放 · 滚轮 / 方向键翻页 · Esc 退出
+          点击画面显隐工具栏 · 缩放按钮 / Ctrl+滚轮 · 滚轮 / 方向键翻页 · Esc 退出
         </div>
       )}
     </div>
