@@ -22,6 +22,12 @@ pub async fn pick_zip_files() -> Result<Vec<String>, String> {
     Err("zip 选择器仅在 Android 上可用".to_string())
 }
 
+/// `pick_images` 的桌面存根（设置页「增加图片」在桌面走插件对话框，不会调到这里）
+#[tauri::command]
+pub async fn pick_images() -> Result<Vec<String>, String> {
+    Err("图片选择器仅在 Android 上可用".to_string())
+}
+
 /// `clear_import_cache` 的桌面存根（无缓存可清，直接成功）
 #[tauri::command]
 pub async fn clear_import_cache() -> Result<(), String> {

@@ -84,6 +84,47 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     }.start()
   }
 
+  /** 选择图片文件（可多选），复制进缓存目录，返回真实路径列表。
+   *  给设置页「增加图片」用：选完后由 Rust 侧复制进书库漫画目录。 */
+  @Command
+  fun pickImages(invoke: Invoke) {
+    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+      addCategory(Intent.CATEGORY_OPENABLE)
+      type = "image/*"
+      putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+    }
+    startActivityForResult(invoke, intent, "imagesPicked")
+  }
+
+  @ActivityCallback
+  fun imagesPicked(invoke: Invoke, result: ActivityResult) {
+    if (result.resultCode != Activity.RESULT_OK) {
+      invoke.resolve(pathsResponse(emptyList()))
+      return
+    }
+    val data = result.data
+    val uris: MutableList<Uri> = ArrayList()
+    if (data?.clipData != null) {
+      for (i in 0 until data.clipData!!.itemCount) {
+        uris.add(data.clipData!!.getItemAt(i).uri)
+      }
+    } else {
+      data?.data?.let { uris.add(it) }
+    }
+    // 与 zip 选择相同：复制放后台线程，完成后回主线程 resolve
+    Thread {
+      try {
+        val dir = prepareDir("picked-images", wipe = true)
+        val paths = uris.mapNotNull { uri ->
+          copyUriToFile(uri, dir, ensureZipExtension = false)
+        }
+        resolveOnUi(invoke) { pathsResponse(paths) }
+      } catch (e: Exception) {
+        rejectOnUi(invoke, e.message ?: "读取所选图片失败")
+      }
+    }.start()
+  }
+
   /** 选择目录（SAF 树选择器），整棵树复制进缓存目录，返回目录路径 */
   @Command
   fun pickDirectory(invoke: Invoke) {
@@ -117,13 +158,14 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     }.start()
   }
 
-  /** 清理导入用的缓存目录（前端导入完成后调用） */
+  /** 清理导入用的缓存目录（前端导入 / 增加图片完成后调用） */
   @Command
   fun clearImportCache(invoke: Invoke) {
     Thread {
       try {
         File(activity.cacheDir, "picked-import").deleteRecursively()
         File(activity.cacheDir, "tree-import").deleteRecursively()
+        File(activity.cacheDir, "picked-images").deleteRecursively()
         resolveOnUi(invoke) { JSObject().put("cleared", true) }
       } catch (e: Exception) {
         rejectOnUi(invoke, e.message ?: "清理导入缓存失败")

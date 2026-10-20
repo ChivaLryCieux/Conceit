@@ -56,6 +56,7 @@ pub fn run() {
             commands::app_platform,
             mobile_import::pick_directory,
             mobile_import::pick_zip_files,
+            mobile_import::pick_images,
             mobile_import::clear_import_cache,
             mobile_import::exit_app,
             mobile_import::system_bar_insets,

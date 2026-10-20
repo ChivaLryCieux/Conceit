@@ -80,7 +80,21 @@ pub async fn pick_zip_files(
     Ok(res.paths)
 }
 
-/// 清理导入桥复制进缓存的临时文件（`picked-import` / `tree-import`）
+/// 打开系统图片选择器（可多选），返回缓存中的真实文件路径；取消返回空列表。
+/// 给设置页「增加图片」用，选完由 `add_manga_pages` 复制进书库
+#[tauri::command]
+pub async fn pick_images(
+    handle: State<'_, ImportHandle<Wry>>,
+) -> Result<Vec<String>, String> {
+    let res: PathsResponse = handle
+        .0
+        .run_mobile_plugin_async("pickImages", serde_json::json!({}))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(res.paths)
+}
+
+/// 清理导入桥复制进缓存的临时文件（`picked-import` / `tree-import` / `picked-images`）
 #[tauri::command]
 pub async fn clear_import_cache(
     handle: State<'_, ImportHandle<Wry>>,
