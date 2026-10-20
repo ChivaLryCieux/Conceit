@@ -86,9 +86,8 @@
     touch-action: manipulation;
   }
 
-  /* 触屏上设置按钮必须常显（没有 hover 可以悬停） */
+  /* 触屏上设置按钮靶子加大（常驻显示已与桌面一致） */
   .card-settings {
-    opacity: 1;
     width: 30px;
     height: 30px;
     margin-right: -6px;
