@@ -138,7 +138,7 @@ node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
 
 Gradle 的原始产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`，
 打包脚本会额外复制一份到仓库根目录、按 `Conceit-<版本>-release.apk` 命名
-（版本取自 `tauri.conf.json`，如 `Conceit-0.1.4-release.apk`），方便直接传手机安装；
+（版本取自 `tauri.conf.json`，如 `Conceit-0.1.5-release.apk`），方便直接传手机安装；
 arm64-v8a + armeabi-v7a 通用包，约 13 MB，minSdk 24 / Android 7.0+。
 
 > Gradle 首次运行需要下载 Gradle 发行版与 AGP 等依赖；国内网络下 `services.gradle.org`
@@ -165,7 +165,7 @@ keyPassword=<密码>
 > 密钥与密码不要提交到 git。
 
 **安装到手机**：开启「设置 → 安全 → 安装未知应用」，把 APK 传到手机点击即可；
-或用数据线执行 `adb install -r Conceit-0.1.4-release.apk`。
+或用数据线执行 `adb install -r Conceit-0.1.5-release.apk`。
 
 > 打包脚本会把 Gradle 的原始产物（`app-universal-release.apk`，Gradle 默认的
 > 模块名+变体命名）复制为 `Conceit-<版本>-release.apk` 放到仓库根目录，
@@ -255,6 +255,13 @@ Android 上 `tauri-plugin-dialog` 有两个硬伤，直接用会报错：
 `image/*` 多选），复制进 `picked-images` 缓存目录，由 `add_manga_pages`
 复制进书库后随 `clear_import_cache` 一并清理。
 
+**导入进度**：安卓的导入是「SAF 拷进缓存 → Rust 再拷进书库」两段，两段都往同一个
+Tauri Channel（`src/api.ts` 的 `ImportProgress`）里按字节上报进度：Kotlin 侧按
+64KB 块回调、`reportCopy` 节流到约 10 次/秒，Rust 侧按文件回调、同样节流，
+`import_sources` 收尾再补一次 100%。总量先按元数据估算（`dir_total_bytes` /
+`treeTotalSize` / `querySize`），拿不到时前端进度条自动降级为不确定态动画。
+生成封面缩略图单独一个阶段，让进度条在解码大图期间也有话说。
+
 > Kotlin 源码的规范副本在 `src-tauri/android/`，`scripts/build-android.mjs` 每次构建前
 > 会把它同步进 `gen/android/app/src/main/java/com/conceit/mangareader/`
 > （`tauri android init` 重建 gen/android 后无需手动拷贝）。仓库里同时保留了工作副本，
@@ -316,6 +323,9 @@ section 头部出现「删除所选 N 页」，再点一次确认才真正删文
   顶部不再为状态栏留白（详见上文）
 - **漫画图片管理**：设置页可增加 / 删除图片与拖动排序，追加不插队、删除两步确认、
   封面页被删自动顺延（详见上文）
+- **导入进度条**：复制 / 解压按字节实时上报（安卓的 SAF 复制与 Rust 书库复制共用
+  一个 Tauri Channel，字段一致），忙碌遮罩显示确定态进度条；提供者不给文件大小时
+  自动降级为不确定态动画（详见上文）
 - **Android 打包**：`tauri android build` 在 Windows 上受符号链接权限所限，改用
   `scripts/build-android.mjs`（文件复制 + 直接调 Gradle），签名走 `keystore.properties`
 

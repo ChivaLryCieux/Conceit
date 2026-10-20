@@ -530,8 +530,38 @@ fn scan_images_inner(base: &Path, dir: &Path, out: &mut Vec<String>) {
     }
 }
 
-/// 递归复制目录内容
-pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
+/// 复制 / 解压进度回调：每复制完一个文件回调一次该文件的字节数。
+/// 传 `&mut |_| {}` 即忽略进度（测试与一次性内部调用用）。
+pub type ProgressFn<'a> = &'a mut dyn FnMut(u64);
+
+/// 统计目录树全部文件大小（进度条的分母）；与 [`copy_dir_all`] 的跳过规则
+/// 保持一致。目录不存在等异常时该项计 0，调用方据此走不确定态。
+pub fn dir_total_bytes(src: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![src.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "__MACOSX" {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(meta) = fs::metadata(&path) {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
+/// 递归复制目录内容；每复制完一个文件向 `on_progress` 回报字节数
+pub fn copy_dir_all(src: &Path, dst: &Path, on_progress: ProgressFn<'_>) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("创建目录失败 {}: {e}", dst.display()))?;
     let entries =
         fs::read_dir(src).map_err(|e| format!("读取目录失败 {}: {e}", src.display()))?;
@@ -545,36 +575,41 @@ pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
         }
         let target = dst.join(&name);
         if path.is_dir() {
-            copy_dir_all(&path, &target)?;
+            copy_dir_all(&path, &target, on_progress)?;
         } else {
-            fs::copy(&path, &target)
+            let copied = fs::copy(&path, &target)
                 .map_err(|e| format!("复制文件失败 {}: {e}", path.display()))?;
+            on_progress(copied);
         }
     }
     Ok(())
 }
 
-/// 从 zip 压缩包中解压出图片内容。
+/// 从 zip 压缩包中解压出图片内容；每解压完一个条目向 `on_progress` 回报字节数。
 ///
 /// 整个解压包一层 `catch_unwind`：zip crate 对畸形压缩包的解析存在 panic
 /// 路径，release 下 panic 会直接终止进程（表现为导入即闪退）。这里把它
 /// 降级成一条普通错误，交由导入方报错并清理半成品目录。
-pub fn extract_zip(src: &Path, dst: &Path) -> Result<(), String> {
+pub fn extract_zip(src: &Path, dst: &Path, on_progress: ProgressFn<'_>) -> Result<(), String> {
     let src = src.to_path_buf();
     let dst = dst.to_path_buf();
-    match std::panic::catch_unwind({
+    let src_for_msg = src.clone();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe({
         let src = src.clone();
-        move || extract_zip_inner(&src, &dst)
-    }) {
+        move || {
+            let mut on_progress = on_progress;
+            extract_zip_inner(&src, &dst, &mut on_progress)
+        }
+    })) {
         Ok(result) => result,
         Err(_) => Err(format!(
             "解压 zip 时内部 panic（压缩包可能已损坏）: {}",
-            src.display()
+            src_for_msg.display()
         )),
     }
 }
 
-fn extract_zip_inner(src: &Path, dst: &Path) -> Result<(), String> {
+fn extract_zip_inner(src: &Path, dst: &Path, on_progress: &mut dyn FnMut(u64)) -> Result<(), String> {
     let file = fs::File::open(src).map_err(|e| format!("打开 zip 失败 {}: {e}", src.display()))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析 zip 失败: {e}"))?;
     for i in 0..archive.len() {
@@ -601,10 +636,35 @@ fn extract_zip_inner(src: &Path, dst: &Path) -> Result<(), String> {
         }
         let mut out = fs::File::create(&out_path)
             .map_err(|e| format!("创建解压文件失败 {}: {e}", out_path.display()))?;
-        std::io::copy(&mut entry, &mut out)
+        let copied = std::io::copy(&mut entry, &mut out)
             .map_err(|e| format!("解压文件失败 {}: {e}", out_path.display()))?;
+        on_progress(copied);
     }
     Ok(())
+}
+
+/// zip 中实际会被解压的图片总字节数（进度条分母）；解析失败返回 0。
+/// 只读中央目录，不解压数据，开销很小。
+pub fn zip_total_bytes(src: &Path) -> u64 {
+    let Ok(file) = fs::File::open(src) else {
+        return 0;
+    };
+    let Ok(mut archive) = zip::ZipArchive::new(file) else {
+        return 0;
+    };
+    let mut total = 0u64;
+    for i in 0..archive.len() {
+        let Ok(entry) = archive.by_index(i) else {
+            continue;
+        };
+        let will_extract = entry
+            .enclosed_name()
+            .is_some_and(|name| !entry.is_dir() && is_image_file(&name));
+        if will_extract {
+            total += entry.size();
+        }
+    }
+    total
 }
 
 /// 从路径推断一个可读的标题
@@ -700,7 +760,10 @@ mod tests {
         fs::write(src.join(".DS_Store"), b"junk").unwrap();
 
         let target = dst.join("manga/m1");
-        copy_dir_all(&src, &target).unwrap();
+        let mut copied = 0u64;
+        copy_dir_all(&src, &target, &mut |n| copied += n).unwrap();
+        // 只统计真实复制的两个文件（.DS_Store 被跳过）
+        assert_eq!(copied, 2);
 
         assert!(target.join("a/b/1.jpg").exists());
         assert!(target.join("2.png").exists());
@@ -708,6 +771,32 @@ mod tests {
 
         fs::remove_dir_all(&src).ok();
         fs::remove_dir_all(&dst).ok();
+    }
+
+    #[test]
+    fn dir_total_bytes_matches_what_copy_dir_all_copies() {
+        let src = temp_dir("total-src");
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("sub/a.jpg"), b"12345").unwrap();
+        fs::write(src.join("b.png"), b"123").unwrap();
+        fs::write(src.join(".DS_Store"), b"ignored").unwrap();
+
+        // 分母必须和实际搬运的字节数一致，否则进度条会在中途冲到 100%
+        assert_eq!(dir_total_bytes(&src), 8);
+
+        let dst = temp_dir("total-dst");
+        let mut copied = 0u64;
+        copy_dir_all(&src, &dst.join("out"), &mut |n| copied += n).unwrap();
+        assert_eq!(copied, dir_total_bytes(&src));
+
+        fs::remove_dir_all(&src).ok();
+        fs::remove_dir_all(&dst).ok();
+    }
+
+    #[test]
+    fn dir_total_bytes_of_missing_dir_is_zero() {
+        // 不存在时返回 0（调用方据此走不确定态），不能 panic
+        assert_eq!(dir_total_bytes(Path::new("definitely-not-here-404")), 0);
     }
 
     #[test]
@@ -847,7 +936,38 @@ mod tests {
         let src = root.join("broken.zip");
         // 只有 zip 魔数的残片：解析必须返回错误而不是 panic 杀进程
         fs::write(&src, b"PK\x03\x04 not really a zip").unwrap();
-        assert!(extract_zip(&src, &root.join("out")).is_err());
+        let mut ignored = 0u64;
+        assert!(extract_zip(&src, &root.join("out"), &mut |n| ignored += n).is_err());
+        assert_eq!(ignored, 0);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn zip_total_bytes_counts_only_images() {
+        use std::io::Write;
+        let root = temp_dir("zip-total");
+        let src = root.join("book.zip");
+        // 手写一个最小 zip：一个图片条目（内容 5 字节）+ 一个 txt（应被忽略）
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            w.start_file("p1.jpg", opts).unwrap();
+            w.write_all(b"12345").unwrap();
+            w.start_file("notes.txt", opts).unwrap();
+            w.write_all(b"skipme").unwrap();
+            w.finish().unwrap();
+        }
+        fs::write(&src, &buf).unwrap();
+
+        assert_eq!(zip_total_bytes(&src), 5);
+
+        // 非 zip / 不存在时返回 0，不能让导入崩在统计分母这一步
+        fs::write(root.join("bad.zip"), b"PK\x03\x04 nope").unwrap();
+        assert_eq!(zip_total_bytes(&root.join("bad.zip")), 0);
+        assert_eq!(zip_total_bytes(&root.join("missing.zip")), 0);
+
         fs::remove_dir_all(&root).ok();
     }
 

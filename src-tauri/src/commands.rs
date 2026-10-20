@@ -1,15 +1,37 @@
 //! Tauri 命令层：书库快照、文件夹、重命名、删除、移动、排序与阅读进度。
 
 use crate::library::{
-    copy_dir_all, copy_images_into_manga, delete_manga_files, extract_zip, make_cover_thumb,
-    now_unix, remove_cover_thumb, same_page_set, scan_images, title_from_path, Item, ItemKind,
-    LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
+    copy_dir_all, copy_images_into_manga, delete_manga_files, dir_total_bytes, extract_zip,
+    make_cover_thumb, now_unix, remove_cover_thumb, same_page_set, scan_images, title_from_path,
+    zip_total_bytes, Item, ItemKind, LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
+
+/// 导入进度：经 Channel 推给前端，驱动忙碌遮罩里的进度条。
+///
+/// 安卓的导入分两段（SAF 拷进缓存 → Rust 拷进书库），两段都往同一个
+/// Channel 里报，字段保持一致，前端无需区分来源。
+#[derive(Serialize, Clone)]
+pub struct ImportProgress {
+    /// 阶段：copy = 复制 / 解压，thumb = 生成封面缩略图
+    pub phase: &'static str,
+    /// 当前是第几部（从 1 开始）
+    pub index: usize,
+    /// 一共几部
+    pub total: usize,
+    /// 当前漫画标题
+    pub title: String,
+    /// 当前这部已处理的字节数
+    pub done_bytes: u64,
+    /// 当前这部预计总字节数；0 = 未知（前端走不确定态）
+    pub total_bytes: u64,
+}
 
 /// 应用共享状态：书库根目录 + 索引
 pub struct AppState {
@@ -350,11 +372,15 @@ pub fn backfill_thumbnails(state: &State<'_, Mutex<AppState>>) -> Result<usize, 
 
 /// 从本机路径导入漫画：文件夹会递归复制，zip 会解压，均落入 `library/manga/<id>/`。
 /// target_folder 为 None 表示导入到根目录。
+///
+/// `channel` 用于把复制 / 解压的字节进度实时推给前端（进度条）；
+/// 桌面端同样可用，调用方传一个不监听的对象即可。
 #[tauri::command]
 pub fn import_sources(
     state: State<'_, Mutex<AppState>>,
     paths: Vec<String>,
     target_folder: Option<String>,
+    channel: Channel,
 ) -> Result<Vec<Item>, String> {
     let mut st = lock(&state)?;
     if let Some(p) = &target_folder {
@@ -363,8 +389,9 @@ pub fn import_sources(
             _ => return Err("目标文件夹不存在".to_string()),
         }
     }
+    let total_items = paths.len();
     let mut imported: Vec<Item> = Vec::new();
-    for path_str in &paths {
+    for (idx, path_str) in paths.iter().enumerate() {
         let src = PathBuf::from(path_str);
         if !src.exists() {
             return Err(format!("路径不存在: {path_str}"));
@@ -384,19 +411,52 @@ pub fn import_sources(
         let rel_dir = format!("{MANGA_DIR_NAME}/{id}");
         let dest = st.root.join(&rel_dir);
 
+        // 进度上报：总量先按元数据估出来（0 = 估不出，前端走不确定态），
+        // 复制过程中按文件节流到约 10 次/秒，避免小文件多时刷爆 IPC
+        let total_bytes = if is_zip {
+            zip_total_bytes(&src)
+        } else {
+            dir_total_bytes(&src)
+        };
+        let send = |phase: &'static str, done_bytes: u64| {
+            let _ = channel.send(InvokeResponseBody::Json(
+                serde_json::to_string(&ImportProgress {
+                    phase,
+                    index: idx + 1,
+                    total: total_items,
+                    title: title.clone(),
+                    done_bytes,
+                    total_bytes,
+                })
+                .unwrap_or_default(),
+            ));
+        };
+        let mut done_bytes = 0u64;
+        let mut last_sent = Instant::now();
+        let mut on_progress = |n: u64| {
+            done_bytes += n;
+            if last_sent.elapsed() >= Duration::from_millis(100) {
+                last_sent = Instant::now();
+                send("copy", done_bytes);
+            }
+        };
+
         if is_zip {
-            if let Err(e) = extract_zip(&src, &dest) {
+            if let Err(e) = extract_zip(&src, &dest, &mut on_progress) {
                 cleanup_partial_import(&dest);
                 return Err(e);
             }
-        } else if let Err(e) = copy_dir_all(&src, &dest) {
+        } else if let Err(e) = copy_dir_all(&src, &dest, &mut on_progress) {
             cleanup_partial_import(&dest);
             return Err(e);
         }
+        // 收尾一定报一次 100%，节流可能把最后一次跳过了
+        send("copy", total_bytes.max(done_bytes));
 
         let pages = scan_images(&dest);
         let cover = pages.first().cloned();
-        // 导入即为封面生成缩略图（书架只显示一百多像素，没必要让 WebView 解码原图）
+        // 生成封面缩略图可能要点时间（解码原图），单独一个阶段让进度条有话说
+        send("thumb", total_bytes.max(done_bytes));
         let thumb = cover
             .as_deref()
             .and_then(|c| make_cover_thumb(&st.root, &id, c));

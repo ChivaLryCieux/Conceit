@@ -19,7 +19,10 @@ interface Props {
   onOpenManga: (item: Item) => void;
   onReload: () => Promise<void> | void;
   onToast: (text: string, tone?: Toast["tone"]) => void;
-  onImport: (paths: string[]) => Promise<Item[]>;
+  onImport: (
+    paths: string[],
+    channel: import("@tauri-apps/api/core").Channel<import("../../api").ImportProgress>
+  ) => Promise<Item[]>;
 }
 
 /** 书架主页：底部功能栏 + 面包屑 + 卡片网格，负责把各模块组合起来 */
@@ -52,7 +55,7 @@ export default function Shelf({
     [snapshot.index, currentFolder]
   );
 
-  const { busy, pickAndImport, createFolderByName, deleteItem, moveTo } =
+  const { busy, progress, pickAndImport, createFolderByName, deleteItem, moveTo } =
     useShelfMutations({
       currentFolder,
       breadcrumbs,
@@ -227,6 +230,21 @@ export default function Shelf({
         <div className="busy-mask">
           <div className="spinner" />
           <div>{busy}</div>
+          {progress && (
+            <div className="busy-progress" aria-label="导入进度">
+              <div
+                className={`busy-progress-bar${
+                  progress.ratio === null ? " busy-progress-bar--indeterminate" : ""
+                }`}
+                style={
+                  progress.ratio === null
+                    ? undefined
+                    : { width: `${Math.round(progress.ratio * 100)}%` }
+                }
+              />
+            </div>
+          )}
+          {progress && <div className="busy-progress-text">{progress.label}</div>}
         </div>
       )}
     </div>

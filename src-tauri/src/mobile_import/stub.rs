@@ -12,13 +12,13 @@ pub fn init<R: tauri::Runtime>() -> TauriPlugin<R> {
 
 /// `pick_directory` 的桌面存根
 #[tauri::command]
-pub async fn pick_directory() -> Result<Option<String>, String> {
+pub async fn pick_directory(_channel: tauri::ipc::Channel) -> Result<Option<String>, String> {
     Err("目录选择器仅在 Android 上可用".to_string())
 }
 
 /// `pick_zip_files` 的桌面存根
 #[tauri::command]
-pub async fn pick_zip_files() -> Result<Vec<String>, String> {
+pub async fn pick_zip_files(_channel: tauri::ipc::Channel) -> Result<Vec<String>, String> {
     Err("zip 选择器仅在 Android 上可用".to_string())
 }
 

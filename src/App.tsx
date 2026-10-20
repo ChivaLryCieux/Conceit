@@ -166,8 +166,8 @@ export default function App() {
         onOpenManga={setReading}
         onReload={reload}
         onToast={pushToast}
-        onImport={async (paths) => {
-          const items = await importSources(paths, currentFolder);
+        onImport={async (paths, channel) => {
+          const items = await importSources(paths, currentFolder, channel);
           await reload();
           return items;
         }}

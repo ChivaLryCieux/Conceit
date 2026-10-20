@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "conceit"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "image",
  "serde",

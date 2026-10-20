@@ -1,6 +1,6 @@
 [package]
 name = "conceit"
-version = "0.1.4"
+version = "0.1.5"
 description = "Conceit（幻想阅读器）— 本地漫画阅读器"
 authors = ["Conceit"]
 edition = "2021"

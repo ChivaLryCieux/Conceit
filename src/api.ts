@@ -1,19 +1,37 @@
 // 对 Rust 命令的薄封装
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { Item, LibraryIndex, LibrarySnapshot } from "./types";
 import { ROOT_KEY } from "./types";
+
+/** 导入进度：Rust 与安卓原生桥（SAF 复制）经同一 Channel 回传，字段一致 */
+export interface ImportProgress {
+  /** 阶段：copy = 复制 / 解压，thumb = 生成封面缩略图 */
+  phase: "copy" | "thumb";
+  /** 当前是第几部（从 1 开始） */
+  index: number;
+  /** 一共几部 */
+  total: number;
+  /** 当前漫画标题 */
+  title: string;
+  /** 当前这部已处理的字节数 */
+  doneBytes: number;
+  /** 当前这部预计总字节数；0 = 未知（进度条走不确定态） */
+  totalBytes: number;
+}
 
 export async function fetchSnapshot(): Promise<LibrarySnapshot> {
   return invoke<LibrarySnapshot>("library_snapshot");
 }
 
-/// 从本机路径导入漫画（目录或 zip），复制进书库；targetFolder 为 null 表示根目录
+/// 从本机路径导入漫画（目录或 zip），复制进书库；targetFolder 为 null 表示根目录。
+/// channel 用于把复制 / 解压的字节进度实时推给前端（进度条）
 export async function importSources(
   paths: string[],
-  targetFolder: string | null
+  targetFolder: string | null,
+  channel: Channel<ImportProgress>
 ): Promise<Item[]> {
-  return invoke<Item[]>("import_sources", { paths, targetFolder });
+  return invoke<Item[]>("import_sources", { paths, targetFolder, channel });
 }
 
 export async function createFolder(
@@ -78,14 +96,20 @@ export async function fetchPages(id: string): Promise<string[]> {
  * content:// URI 而非文件系统路径；这些命令由内置 Kotlin 插件
  * （src-tauri/android/ConceitPlugin.kt）返回缓存里的真实路径。 */
 
-/** 打开系统目录选择器，返回缓存中的真实目录路径；取消返回 null */
-export async function pickDirectory(): Promise<string | null> {
-  return invoke<string | null>("pick_directory");
+/** 打开系统目录选择器，返回缓存中的真实目录路径；取消返回 null。
+ *  channel 由原生侧在 SAF 复制过程中回报进度（可选，不传则没有进度） */
+export async function pickDirectory(
+  channel: Channel<ImportProgress>
+): Promise<string | null> {
+  return invoke<string | null>("pick_directory", { channel });
 }
 
-/** 打开系统文件选择器（zip，可多选），返回缓存中的真实文件路径 */
-export async function pickZipFiles(): Promise<string[]> {
-  return invoke<string[]>("pick_zip_files");
+/** 打开系统文件选择器（zip，可多选），返回缓存中的真实文件路径；
+ *  channel 由原生侧在复制过程中回报进度 */
+export async function pickZipFiles(
+  channel: Channel<ImportProgress>
+): Promise<string[]> {
+  return invoke<string[]>("pick_zip_files", { channel });
 }
 
 /** 清理导入桥复制进缓存的临时文件 */

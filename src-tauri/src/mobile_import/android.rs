@@ -54,14 +54,21 @@ struct PathsResponse {
 }
 
 /// 打开系统目录选择器，返回缓存中的真实目录路径；取消返回 `None`
-/// （运行时固定为 Wry：泛型命令无法在 app 级 generate_handler! 里推断 R）
+/// （运行时固定为 Wry：泛型命令无法在 app 级 generate_handler! 里推断 R）。
+///
+/// `channel` 透传给 Kotlin 侧：SAF 把整棵树复制进缓存的过程往往比之后的
+/// 书库复制更久，进度也由它经同一 Channel 回报（见 ImportProgress）。
 #[tauri::command]
 pub async fn pick_directory(
     handle: State<'_, ImportHandle<Wry>>,
+    channel: tauri::ipc::Channel,
 ) -> Result<Option<String>, String> {
     let res: PathResponse = handle
         .0
-        .run_mobile_plugin_async("pickDirectory", serde_json::json!({}))
+        .run_mobile_plugin_async(
+            "pickDirectory",
+            serde_json::json!({ "channel": channel }),
+        )
         .await
         .map_err(|e| e.to_string())?;
     Ok(res.path)
@@ -71,10 +78,11 @@ pub async fn pick_directory(
 #[tauri::command]
 pub async fn pick_zip_files(
     handle: State<'_, ImportHandle<Wry>>,
+    channel: tauri::ipc::Channel,
 ) -> Result<Vec<String>, String> {
     let res: PathsResponse = handle
         .0
-        .run_mobile_plugin_async("pickZipFiles", serde_json::json!({}))
+        .run_mobile_plugin_async("pickZipFiles", serde_json::json!({ "channel": channel }))
         .await
         .map_err(|e| e.to_string())?;
     Ok(res.paths)
