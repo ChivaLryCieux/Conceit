@@ -20,6 +20,8 @@ interface Props {
   onClose: () => void;
   onSaved: () => void | Promise<void>;
   onToast: (text: string, tone?: "info" | "error" | "success") => void;
+  /** 请求删除该条目（二次确认与执行由 Shelf 负责） */
+  onDelete: (item: Item) => void;
 }
 
 /** 条目设置：名称、是否展示封面、选择漫画某一页作为封面；
@@ -30,6 +32,7 @@ export default function ItemSettings({
   onClose,
   onSaved,
   onToast,
+  onDelete,
 }: Props) {
   const [title, setTitle] = useState(item.title);
   const [showCover, setShowCover] = useState(item.show_cover);
@@ -320,6 +323,24 @@ export default function ItemSettings({
           文件夹在书架上以固定图标展示，暂无封面设置。
         </p>
       )}
+
+      {/* 危险操作区：删除入口。漫画连同书库中的本地文件一并删除
+          （Rust 侧 delete_items 已递归处理目录与缩略图），文件夹递归
+          删除其中内容；二次确认在 Shelf 的 ConfirmDialog 中完成 */}
+      <div className="settings-danger">
+        <button
+          type="button"
+          className="btn btn-danger"
+          onClick={() => onDelete(item)}
+        >
+          {isManga ? "删除漫画（连同本地文件）" : "删除文件夹"}
+        </button>
+        <p className="settings-hint">
+          {isManga
+            ? "删除后书库中该漫画复制进来的图片文件将一并移除，无法恢复。"
+            : "删除后文件夹及其中所有条目将一并移除，无法恢复。"}
+        </p>
+      </div>
     </Modal>
   );
 }

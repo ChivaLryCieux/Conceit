@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import Card from "./Card";
 import ContextMenu, { type MenuAction } from "../ui/ContextMenu";
+import ConfirmDialog from "../ui/ConfirmDialog";
 import InputDialog from "../ui/InputDialog";
 import ItemSettings from "../ItemSettings";
 import ShelfHeader from "./ShelfHeader";
@@ -41,6 +42,8 @@ export default function Shelf({
   const [folderDialog, setFolderDialog] = useState(false);
   /** 条目设置弹窗 */
   const [settingsItem, setSettingsItem] = useState<Item | null>(null);
+  /** 删除二次确认（右键菜单与设置弹窗共用） */
+  const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   // 书架条目只在快照或所在目录变化时重算（排序过程中会频繁触发重渲染）
@@ -49,7 +52,7 @@ export default function Shelf({
     [snapshot.index, currentFolder]
   );
 
-  const { busy, pickAndImport, createFolderByName, removeItem, moveTo } =
+  const { busy, pickAndImport, createFolderByName, deleteItem, moveTo } =
     useShelfMutations({
       currentFolder,
       breadcrumbs,
@@ -93,7 +96,7 @@ export default function Shelf({
       label: "删除",
       danger: true,
       separatorBefore: true,
-      onSelect: () => void removeItem(item),
+      onSelect: () => setConfirmDelete(item),
     });
     return actions;
   }
@@ -192,6 +195,31 @@ export default function Shelf({
           onClose={() => setSettingsItem(null)}
           onSaved={() => onReload()}
           onToast={onToast}
+          onDelete={(item) => setConfirmDelete(item)}
+        />
+      )}
+
+      {/* 删除二次确认：右键菜单与设置弹窗共用；后注册的返回消费者
+          （确认框）优先于设置弹窗被消费，返回键只关确认框 */}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={confirmDelete.kind === "folder" ? "删除文件夹" : "删除漫画"}
+          message={
+            confirmDelete.kind === "folder"
+              ? `确定删除文件夹「${confirmDelete.title}」及其中所有内容吗？此操作不可恢复。`
+              : `确定删除漫画「${confirmDelete.title}」吗？书库中该漫画的图片文件也会一并删除，无法恢复。`
+          }
+          confirmText="删除"
+          danger
+          onConfirm={async () => {
+            const item = confirmDelete;
+            // 先关弹窗再执行：设置弹窗可能正开着（从设置里发起的删除），
+            // 且删除后条目已不存在，弹窗继续显示会操作到陈旧数据
+            setConfirmDelete(null);
+            setSettingsItem(null);
+            await deleteItem(item);
+          }}
+          onClose={() => setConfirmDelete(null)}
         />
       )}
 

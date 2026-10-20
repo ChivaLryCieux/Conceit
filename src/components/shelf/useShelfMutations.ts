@@ -106,12 +106,10 @@ export function useShelfMutations({
     }
   }
 
-  async function removeItem(item: Item) {
-    const message =
-      item.kind === "folder"
-        ? `确定删除文件夹「${item.title}」及其中所有内容吗？`
-        : `确定移除「${item.title}」吗？书库中复制的文件也会一并删除。`;
-    if (!window.confirm(message)) return;
+  /** 删除条目：文件夹递归删除其中内容；漫画连同磁盘目录与封面缩略图一并删除。
+   *  删掉的正是当前所在文件夹时先退回上一层。二次确认由调用方负责
+   *  （ConfirmDialog——window.confirm 在安卓 WebView 上会被直接取消）。 */
+  async function deleteItem(item: Item) {
     try {
       await deleteItems([item.id]);
       // 如果删掉的正是当前所在文件夹，先退回上一层
@@ -119,6 +117,7 @@ export function useShelfMutations({
         onNavigateDepth(Math.max(0, breadcrumbs.length - 2));
       }
       await onReload();
+      onToast(`已删除「${item.title}」`, "success");
     } catch (e) {
       onToast(`删除失败：${e}`, "error");
     }
@@ -133,5 +132,5 @@ export function useShelfMutations({
     }
   }
 
-  return { busy, pickAndImport, createFolderByName, removeItem, moveTo };
+  return { busy, pickAndImport, createFolderByName, deleteItem, moveTo };
 }

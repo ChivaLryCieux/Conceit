@@ -217,6 +217,29 @@
   line-height: 1.6;
 }
 
+/* ---------- 确认弹窗文案 ---------- */
+
+.confirm-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+/* ---------- 设置弹窗内的危险操作区 ---------- */
+
+.settings-danger {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-danger .btn {
+  align-self: flex-start;
+}
+
 /* ---------- 封面选择器 ---------- */
 
 .page-picker {
