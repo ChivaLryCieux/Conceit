@@ -4,14 +4,18 @@ import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowInsetsControllerCompat
 
 /**
  * Conceit 的主 Activity。
  *
- * 相对 tauri 生成的默认版本，只多做一件事：拦截系统返回。
- * TauriActivity 关闭了 wry 的默认返回处理（handleBackNavigation = false），
- * 不拦截时系统会直接结束 Activity——也就是在阅读器里划边缘返回也会退出应用。
- * 这里把「返回」改判给前端：阅读器→回书架、文件夹→上一层、根目录→退出。
+ * 相对 tauri 生成的默认版本，多了两处针对性改动：
+ * 1. **拦截系统返回**：TauriActivity 关闭了 wry 的默认返回处理
+ *    （handleBackNavigation = false），不拦截时系统会直接结束
+ *    Activity——也就是在阅读器里划边缘返回也会退出应用。这里把「返回」
+ *    改判给前端：阅读器→回书架、文件夹→上一层、根目录→退出。
+ * 2. **系统栏图标用白色**：界面是深色的，而主题是 DayNight，浅色系统下
+ *    系统会给深色图标，压在深色内容上看不清。
  *
  * 注意：本文件同时是 gen/android 下同名文件的规范副本，
  * scripts/build-android.mjs 每次构建前会把 src-tauri/android/ 下的 Kotlin
@@ -24,6 +28,13 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+
+    // 深色界面：状态栏与底部导航栏的图标 / 文字都用浅色。
+    // enableEdgeToEdge 会按 DayNight 主题设置，这里显式压回浅色图标
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      isAppearanceLightStatusBars = false
+      isAppearanceLightNavigationBars = false
+    }
 
     // 硬件返回键与边缘滑动手势都会走 OnBackPressedDispatcher。
     // 注册在 super.onCreate() 之后：wry 因 handleBackNavigation = false 不会
