@@ -12,6 +12,8 @@ interface Props {
   onCreateFolder: () => void;
   /** 新建一部空漫画（之后在它的设置里手动添加图片） */
   onCreateManga: () => void;
+  /** 打开书库体检（索引与磁盘实况对比） */
+  onLibraryHealth: () => void;
   onCrumbDragOver: (e: DragEvent, index: number) => void;
   onCrumbDragLeave: () => void;
   onCrumbDrop: (e: DragEvent, folderId: string | null) => void;
@@ -26,6 +28,7 @@ export default function ShelfHeader({
   onImportZip,
   onCreateFolder,
   onCreateManga,
+  onLibraryHealth,
   onCrumbDragOver,
   onCrumbDragLeave,
   onCrumbDrop,
@@ -74,6 +77,9 @@ export default function ShelfHeader({
         </button>
         <button type="button" className="btn" onClick={onCreateManga}>
           新建漫画
+        </button>
+        <button type="button" className="btn" onClick={onLibraryHealth}>
+          书库体检
         </button>
       </div>
     </header>

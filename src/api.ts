@@ -1,7 +1,12 @@
 // 对 Rust 命令的薄封装
 
 import { invoke, type Channel } from "@tauri-apps/api/core";
-import type { Item, LibraryIndex, LibrarySnapshot } from "./types";
+import type {
+  HealthReport,
+  Item,
+  LibraryIndex,
+  LibrarySnapshot,
+} from "./types";
 import { ROOT_KEY } from "./types";
 
 /** 导入进度：Rust 与安卓原生桥（SAF 复制）经同一 Channel 回传，字段一致 */
@@ -94,6 +99,31 @@ export async function reorder(
 
 export async function saveProgress(id: string, progress: number): Promise<void> {
   return invoke("save_progress", { id, progress });
+}
+
+/* ---------- 书库体检 ---------- */
+
+/** 体检：把磁盘实况与索引对比，返回全部差异（含每个漫画目录里实际有什么） */
+export async function libraryHealth(): Promise<HealthReport> {
+  return invoke<HealthReport>("library_health");
+}
+
+export interface HealthCleanupTarget {
+  id: string;
+  /** 是否连同磁盘目录一起删除 */
+  deleteFiles: boolean;
+}
+
+/** 按体检结果清理：移除书架条目与 / 或删除磁盘目录，返回处理的条目数 */
+export async function libraryHealthClean(
+  targets: HealthCleanupTarget[]
+): Promise<number> {
+  return invoke<number>("library_health_clean", { targets });
+}
+
+/** 按磁盘实况重新扫描某部漫画的页数 / 封面 / 缩略图，返回更新后的条目 */
+export async function rescanMangaPages(id: string): Promise<Item> {
+  return invoke<Item>("rescan_manga_pages", { id });
 }
 
 export async function fetchPages(id: string): Promise<string[]> {

@@ -430,3 +430,119 @@
   opacity: 0.92;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
 }
+
+/* ---------- 书库体检 ---------- */
+
+.health-summary {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.health-ok {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+.health-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.health-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.health-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.health-row-main {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.health-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.health-group-head {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.health-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.health-name {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.health-stat {
+  color: var(--text-dim);
+}
+
+.health-stat-warn {
+  color: var(--danger);
+}
+
+.health-sample {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.health-disclosure {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.health-disk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.health-disk-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+  padding: 4px 2px;
+}

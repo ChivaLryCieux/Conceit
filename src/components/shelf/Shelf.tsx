@@ -4,6 +4,7 @@ import ContextMenu, { type MenuAction } from "../ui/ContextMenu";
 import ConfirmDialog from "../ui/ConfirmDialog";
 import InputDialog from "../ui/InputDialog";
 import ItemSettings from "../ItemSettings";
+import LibraryHealth from "../LibraryHealth";
 import ShelfHeader from "./ShelfHeader";
 import { childrenOf } from "../../api";
 import type { Item, LibrarySnapshot, Toast } from "../../types";
@@ -47,6 +48,8 @@ export default function Shelf({
   const [mangaDialog, setMangaDialog] = useState(false);
   /** 条目设置弹窗 */
   const [settingsItem, setSettingsItem] = useState<Item | null>(null);
+  /** 书库体检弹窗（索引与磁盘实况对比） */
+  const [healthOpen, setHealthOpen] = useState(false);
   /** 删除二次确认（右键菜单与设置弹窗共用） */
   const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -174,6 +177,7 @@ export default function Shelf({
         onImportZip={() => void pickAndImport("zip")}
         onCreateFolder={() => setFolderDialog(true)}
         onCreateManga={() => setMangaDialog(true)}
+        onLibraryHealth={() => setHealthOpen(true)}
         onCrumbDragOver={handlers.onCrumbDragOver}
         onCrumbDragLeave={handlers.onCrumbDragLeave}
         onCrumbDrop={handlers.onCrumbDrop}
@@ -222,6 +226,14 @@ export default function Shelf({
           onSaved={() => onReload()}
           onToast={onToast}
           onDelete={(item) => setConfirmDelete(item)}
+        />
+      )}
+
+      {healthOpen && (
+        <LibraryHealth
+          onClose={() => setHealthOpen(false)}
+          onChanged={() => onReload()}
+          onToast={onToast}
         />
       )}
 
