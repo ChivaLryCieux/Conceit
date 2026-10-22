@@ -138,6 +138,44 @@ pub fn create_folder(
     Ok(item)
 }
 
+/// 新建一部空漫画（还没有图片），之后在设置里「＋ 添加图片」逐张补充。
+/// parent 为 None 表示根目录。
+///
+/// 与 import_sources 的区别：不读取任何源文件，只在索引里登记一部
+/// pages 为空的漫画，并预建它的目录——首张图片由 add_manga_pages
+/// 直接写入，封面也会自动落到第一页。
+#[tauri::command]
+pub fn create_empty_manga(
+    state: State<'_, Mutex<AppState>>,
+    name: String,
+    parent: Option<String>,
+) -> Result<Item, String> {
+    let title = name.trim().to_string();
+    if title.is_empty() {
+        return Err("漫画名称不能为空".to_string());
+    }
+    let mut st = lock(&state)?;
+    if let Some(p) = &parent {
+        match st.index.item(p) {
+            Some(item) if item.kind == ItemKind::Folder => {}
+            _ => return Err("目标文件夹不存在".to_string()),
+        }
+    }
+    let item = st.index.insert_empty_manga(&title, parent.as_deref());
+    // 预建漫画目录：与导入的漫画保持同一不变量（每部漫画都有 manga/<id>/），
+    // 之后 add_manga_pages 直接把图片写进去
+    let dir = st.root.join(MANGA_DIR_NAME).join(&item.id);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        // 目录建不出来：撤销索引里的登记，别留给用户一部加不了图的漫画
+        // （消耗掉一个 id 序号无妨，id 本就不要求连续）
+        st.index.items.retain(|i| i.id != item.id);
+        st.index.detach(&item.id);
+        return Err(format!("创建漫画目录失败 {}: {e}", dir.display()));
+    }
+    st.save()?;
+    Ok(item)
+}
+
 /// 重命名条目
 #[tauri::command]
 pub fn rename_item(

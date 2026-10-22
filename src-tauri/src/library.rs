@@ -277,6 +277,32 @@ impl LibraryIndex {
         }
         false
     }
+
+    /// 登记一部空漫画（pages 为空、无封面）并挂到 parent 下，返回新条目。
+    ///
+    /// 只负责索引与排序：磁盘目录由调用方创建（见 commands::create_empty_manga），
+    /// 之后用户用「添加图片」往里补图，封面自动落到第一页。
+    pub fn insert_empty_manga(&mut self, title: &str, parent: Option<&str>) -> Item {
+        let id = self.next_id(ItemKind::Manga);
+        let item = Item {
+            id: id.clone(),
+            kind: ItemKind::Manga,
+            title: title.to_string(),
+            parent: parent.map(|s| s.to_string()),
+            show_cover: false,
+            manga: Some(MangaMeta {
+                dir: format!("{MANGA_DIR_NAME}/{id}"),
+                cover: None,
+                thumb: None,
+                pages: Vec::new(),
+                progress: 0.0,
+            }),
+            added_at: now_unix(),
+        };
+        self.items.push(item.clone());
+        self.attach(&id, parent);
+        item
+    }
 }
 
 /// 在内存预算内解码一张图片；超预算、格式不支持或解码器内部 panic 时返回 None。
@@ -1101,5 +1127,35 @@ mod tests {
         assert!(!same_page_set(&a, &["1.jpg".into(), "2.jpg".into(), "3.jpg".into()]));
         assert!(!same_page_set(&a, &["1.jpg".into()]));
         assert!(!same_page_set(&a, &["1.jpg".into(), "3.jpg".into()]));
+    }
+
+    #[test]
+    fn insert_empty_manga_registers_pageless_item() {
+        let mut idx = LibraryIndex::default();
+        idx.items.push(folder("f1", None));
+        idx.attach("f1", None);
+
+        let at_root = idx.insert_empty_manga("空漫画", None);
+        let in_folder = idx.insert_empty_manga("另一部", Some("f1"));
+
+        for it in [&at_root, &in_folder] {
+            assert_eq!(it.kind, ItemKind::Manga);
+            assert!(!it.show_cover); // 与导入一致：默认纯色封面
+            let meta = it.manga.as_ref().expect("漫画必须带 meta");
+            // 空漫画：没有图片、没有封面，目录按 id 生成
+            assert!(meta.pages.is_empty());
+            assert!(meta.cover.is_none());
+            assert!(meta.thumb.is_none());
+            assert_eq!(meta.progress, 0.0);
+            assert_eq!(meta.dir, format!("manga/{}", it.id));
+        }
+        // 父子关系与容器顺序都登记到位
+        assert_eq!(at_root.parent, None);
+        assert_eq!(in_folder.parent.as_deref(), Some("f1"));
+        assert_eq!(idx.children(None).len(), 2); // f1 + 空漫画
+        assert_eq!(idx.children(Some("f1")).len(), 1);
+        // id 互不重复（都走 m 前缀分配）
+        assert_ne!(at_root.id, in_folder.id);
+        assert!(at_root.id.starts_with('m'));
     }
 }

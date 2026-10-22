@@ -41,6 +41,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::library_snapshot,
             commands::create_folder,
+            commands::create_empty_manga,
             commands::rename_item,
             commands::delete_items,
             commands::move_item,
