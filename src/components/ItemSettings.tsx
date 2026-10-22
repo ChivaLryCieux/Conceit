@@ -162,6 +162,27 @@ export default function ItemSettings({
     });
   }
 
+  /** 危险操作区：删除入口。漫画连同书库中的本地文件一并删除
+   *  （Rust 侧 delete_items 已递归处理目录与缩略图），文件夹递归
+   *  删除其中内容；二次确认在 Shelf 的 ConfirmDialog 中完成。
+   *  漫画设置里放在封面选择（缩略图网格）上方，见下面 isManga 分支。 */
+  const dangerZone = (
+    <div className="settings-danger">
+      <button
+        type="button"
+        className="btn btn-danger"
+        onClick={() => onDelete(item)}
+      >
+        {isManga ? "删除漫画（连同本地文件）" : "删除文件夹"}
+      </button>
+      <p className="settings-hint">
+        {isManga
+          ? "删除后书库中该漫画复制进来的图片文件将一并移除，无法恢复。"
+          : "删除后文件夹及其中所有条目将一并移除，无法恢复。"}
+      </p>
+    </div>
+  );
+
   return (
     <Modal
       title={`设置 · ${item.title}`}
@@ -208,6 +229,10 @@ export default function ItemSettings({
               {showCover ? "书架显示封面图" : "书架显示纯色封面"}
             </span>
           </label>
+
+          {/* 删除入口置于封面选择上方：网格里全是点选封面 / 拖动排序的
+              手势，危险键放上面既不怕误触，也不用滚过整片网格才够得着 */}
+          {dangerZone}
 
           <div className="pages-section">
             <div className="pages-section-head">
@@ -319,28 +344,13 @@ export default function ItemSettings({
           </div>
         </>
       ) : (
-        <p className="settings-hint">
-          文件夹在书架上以固定图标展示，暂无封面设置。
-        </p>
+        <>
+          <p className="settings-hint">
+            文件夹在书架上以固定图标展示，暂无封面设置。
+          </p>
+          {dangerZone}
+        </>
       )}
-
-      {/* 危险操作区：删除入口。漫画连同书库中的本地文件一并删除
-          （Rust 侧 delete_items 已递归处理目录与缩略图），文件夹递归
-          删除其中内容；二次确认在 Shelf 的 ConfirmDialog 中完成 */}
-      <div className="settings-danger">
-        <button
-          type="button"
-          className="btn btn-danger"
-          onClick={() => onDelete(item)}
-        >
-          {isManga ? "删除漫画（连同本地文件）" : "删除文件夹"}
-        </button>
-        <p className="settings-hint">
-          {isManga
-            ? "删除后书库中该漫画复制进来的图片文件将一并移除，无法恢复。"
-            : "删除后文件夹及其中所有条目将一并移除，无法恢复。"}
-        </p>
-      </div>
     </Modal>
   );
 }
