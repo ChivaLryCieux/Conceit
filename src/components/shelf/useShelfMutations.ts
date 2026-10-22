@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import {
   clearImportCache,
+  createEmptyManga,
   createFolder,
   deleteItems,
   isAndroid,
@@ -147,6 +148,19 @@ export function useShelfMutations({
     }
   }
 
+  /** 新建空漫画（之后在设置里手动添加图片）；成功返回 true */
+  async function createMangaByName(name: string): Promise<boolean> {
+    try {
+      await createEmptyManga(name, currentFolder);
+      await onReload();
+      onToast(`已创建「${name}」，在设置里添加图片`, "success");
+      return true;
+    } catch (e) {
+      onToast(`创建漫画失败：${e}`, "error");
+      return false;
+    }
+  }
+
   /** 删除条目：文件夹递归删除其中内容；漫画连同磁盘目录与封面缩略图一并删除。
    *  删掉的正是当前所在文件夹时先退回上一层。二次确认由调用方负责
    *  （ConfirmDialog——window.confirm 在安卓 WebView 上会被直接取消）。 */
@@ -178,6 +192,7 @@ export function useShelfMutations({
     progress,
     pickAndImport,
     createFolderByName,
+    createMangaByName,
     deleteItem,
     moveTo,
   };

@@ -43,6 +43,8 @@ export default function Shelf({
   );
   /** 新建文件夹弹窗 */
   const [folderDialog, setFolderDialog] = useState(false);
+  /** 新建空漫画弹窗（建好后在设置里手动添加图片） */
+  const [mangaDialog, setMangaDialog] = useState(false);
   /** 条目设置弹窗 */
   const [settingsItem, setSettingsItem] = useState<Item | null>(null);
   /** 删除二次确认（右键菜单与设置弹窗共用） */
@@ -55,8 +57,15 @@ export default function Shelf({
     [snapshot.index, currentFolder]
   );
 
-  const { busy, progress, pickAndImport, createFolderByName, deleteItem, moveTo } =
-    useShelfMutations({
+  const {
+    busy,
+    progress,
+    pickAndImport,
+    createFolderByName,
+    createMangaByName,
+    deleteItem,
+    moveTo,
+  } = useShelfMutations({
       currentFolder,
       breadcrumbs,
       onImport,
@@ -111,7 +120,7 @@ export default function Shelf({
           <p className="shelf-empty-title">这个书架还空着</p>
           <p>
             点击「导入文件夹」选择本机漫画目录，或把文件夹 / zip
-            直接拖到窗口里
+            直接拖到窗口里；也可以先「新建漫画」建一部空漫画，再在它的设置里逐张添加图片
           </p>
           <button
             type="button"
@@ -164,6 +173,7 @@ export default function Shelf({
         onImportDir={() => void pickAndImport("dir")}
         onImportZip={() => void pickAndImport("zip")}
         onCreateFolder={() => setFolderDialog(true)}
+        onCreateManga={() => setMangaDialog(true)}
         onCrumbDragOver={handlers.onCrumbDragOver}
         onCrumbDragLeave={handlers.onCrumbDragLeave}
         onCrumbDrop={handlers.onCrumbDrop}
@@ -188,6 +198,19 @@ export default function Shelf({
             if (await createFolderByName(name)) setFolderDialog(false);
           }}
           onClose={() => setFolderDialog(false)}
+        />
+      )}
+
+      {mangaDialog && (
+        <InputDialog
+          title="新建漫画"
+          label="漫画名称"
+          placeholder="例如：海贼王"
+          confirmText="创建"
+          onConfirm={async (name) => {
+            if (await createMangaByName(name)) setMangaDialog(false);
+          }}
+          onClose={() => setMangaDialog(false)}
         />
       )}
 

@@ -41,6 +41,15 @@ export async function createFolder(
   return invoke<Item>("create_folder", { name, parent });
 }
 
+/** 新建一部空漫画（还没有图片），之后在设置里「＋ 添加图片」逐张补充；
+ *  parent 为 null 表示根目录 */
+export async function createEmptyManga(
+  name: string,
+  parent: string | null
+): Promise<Item> {
+  return invoke<Item>("create_empty_manga", { name, parent });
+}
+
 export async function renameItem(id: string, title: string): Promise<void> {
   return invoke("rename_item", { id, title });
 }
