@@ -458,6 +458,337 @@ pub fn same_page_set(current: &[String], next: &[String]) -> bool {
     a == b
 }
 
+/// 体检报告里展示的文件名样本个数
+const DIR_SAMPLE_LIMIT: usize = 8;
+
+/// 漫画目录在磁盘上的实况（体检报告的「目录里实际有什么」）
+#[derive(Debug, Clone, Serialize)]
+pub struct DirStat {
+    /// 目录名（即漫画 id，如 m3）
+    pub id: String,
+    /// 索引里的标题；索引中没有该目录时为 None（孤儿目录）
+    pub title: Option<String>,
+    /// 磁盘上文件总数（跳过隐藏文件与 `__MACOSX`，与复制口径一致）
+    pub files: usize,
+    /// 其中图片数（`scan_images` 口径，即书架实际能读到的页数）
+    pub images: usize,
+    /// 目录总字节
+    pub bytes: u64,
+    /// 前若干个文件名，让用户直接看到目录里装了什么
+    pub sample: Vec<String>,
+}
+
+/// 索引里有条目、磁盘上却找不到对应目录
+#[derive(Debug, Clone, Serialize)]
+pub struct MissingEntry {
+    pub id: String,
+    pub title: String,
+    /// 索引里记录的页数
+    pub pages: usize,
+}
+
+/// 疑似重复的一组漫画（同名，且页面集合一致或页数相同）
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateGroup {
+    pub title: String,
+    /// `pages_identical` = 页面集合完全相同，基本可确定是同一部漫画导了两次；
+    /// `same_title_same_count` = 同名同页数但文件名不同（重复导入前后改过名）
+    pub reason: &'static str,
+    pub members: Vec<DuplicateMember>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateMember {
+    pub id: String,
+    /// 索引里记录的页数
+    pub pages: usize,
+    /// 磁盘上实际的图片数
+    pub images: usize,
+    /// 目录字节数
+    pub bytes: u64,
+    /// 加入书库的时间（Unix 秒）
+    pub added_at: u64,
+    /// 阅读进度 0-1（保留进度高的那份通常更合理）
+    pub progress: f64,
+    /// 该成员的目录是否已丢失
+    pub dir_missing: bool,
+}
+
+/// 索引页数与磁盘图片数不一致
+#[derive(Debug, Clone, Serialize)]
+pub struct PageDrift {
+    pub id: String,
+    pub title: String,
+    /// 索引里记录的页数
+    pub indexed: usize,
+    /// 磁盘上实际的图片数
+    pub on_disk: usize,
+}
+
+/// 书库体检报告：把磁盘实况与索引对比后的全部差异。
+///
+/// 导入是「先复制文件、后写索引」两步，中间任何一步死掉都会留下对不上的
+/// 状态：死在复制后会留下孤儿目录（书架上看不见、白占空间），死在写索引
+/// 前则下一次导入会复用同一个 id 把内容合并进旧目录；而两次都成功落盘
+/// 就是两部一模一样的漫画。这些后果平时无从察觉（用户看不到应用内部
+/// 目录），体检把它们翻到明面上，并可一键清理。
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthReport {
+    /// 索引中的漫画条目数
+    pub indexed: usize,
+    /// 磁盘 `manga/` 下的目录数
+    pub on_disk: usize,
+    /// 索引有条目、目录丢了
+    pub missing_dirs: Vec<MissingEntry>,
+    /// 目录在磁盘上、索引里没有
+    pub orphan_dirs: Vec<DirStat>,
+    /// 疑似重复
+    pub duplicates: Vec<DuplicateGroup>,
+    /// 索引页数与磁盘图片数不一致
+    pub page_drift: Vec<PageDrift>,
+    /// 磁盘上每个漫画目录的实况（含孤儿目录），按 id 排序
+    pub disk_stats: Vec<DirStat>,
+}
+
+/// 漫画条目在磁盘上的目录名：取 `manga.dir` 的最后一段，与导入时
+/// `manga/<id>` 的建目录规则一致；数据异常时退回 id 本身。
+fn manga_dir_name(item: &Item) -> String {
+    let Some(meta) = item.manga.as_ref() else {
+        return item.id.clone();
+    };
+    meta.dir
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(item.id.as_str())
+        .to_string()
+}
+
+fn manga_pages(item: &Item) -> &[String] {
+    item.manga
+        .as_ref()
+        .map(|m| m.pages.as_slice())
+        .unwrap_or(&[])
+}
+
+/// 递归遍历目录下的文件（跳过隐藏文件与 `__MACOSX`）
+fn walk_files(dir: &Path, out: &mut dyn FnMut(&Path)) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut children: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    children.sort();
+    for path in children {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if name.starts_with('.') || name == "__MACOSX" {
+            continue;
+        }
+        if path.is_dir() {
+            walk_files(&path, out);
+        } else {
+            out(&path);
+        }
+    }
+}
+
+/// 遍历 `manga/` 下每个目录，统计文件数 / 图片数 / 字节数并取文件名样本
+fn scan_manga_dirs(manga_root: &Path) -> Vec<DirStat> {
+    let mut out: Vec<DirStat> = Vec::new();
+    let Ok(entries) = fs::read_dir(manga_root) else {
+        return out;
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+    for dir in dirs {
+        let id = dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let mut files = 0usize;
+        let mut bytes = 0u64;
+        let mut names: Vec<String> = Vec::new();
+        walk_files(&dir, &mut |path| {
+            files += 1;
+            if let Ok(meta) = fs::metadata(path) {
+                bytes += meta.len();
+            }
+            if let Some(name) = path.file_name() {
+                names.push(name.to_string_lossy().to_string());
+            }
+        });
+        names.sort();
+        names.truncate(DIR_SAMPLE_LIMIT);
+        out.push(DirStat {
+            id,
+            title: None,
+            files,
+            images: scan_images(&dir).len(),
+            bytes,
+            sample: names,
+        });
+    }
+    out
+}
+
+/// 体检：对比磁盘实况与索引，产出 [`HealthReport`]
+pub fn build_health_report(root: &Path, index: &LibraryIndex) -> HealthReport {
+    let manga_root = root.join(MANGA_DIR_NAME);
+    let mut disk_stats = scan_manga_dirs(&manga_root);
+
+    let mangas: Vec<&Item> = index
+        .items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Manga)
+        .collect();
+    // 磁盘实况补上索引里的标题，孤儿目录保持 None
+    for stat in &mut disk_stats {
+        stat.title = mangas
+            .iter()
+            .find(|m| manga_dir_name(m) == stat.id)
+            .map(|m| m.title.clone());
+    }
+    let stat_by_id: HashMap<&str, &DirStat> =
+        disk_stats.iter().map(|s| (s.id.as_str(), s)).collect();
+
+    // 1. 索引有条目、磁盘没有目录：写索引前就死了，或文件被外部清掉
+    let mut missing_dirs = Vec::new();
+    for item in &mangas {
+        if !stat_by_id.contains_key(manga_dir_name(item).as_str()) {
+            missing_dirs.push(MissingEntry {
+                id: item.id.clone(),
+                title: item.title.clone(),
+                pages: manga_pages(item).len(),
+            });
+        }
+    }
+
+    // 2. 目录在、索引没有：复制完文件后死在写索引前，书架上看不见但白占空间
+    let referenced: HashSet<String> = mangas.iter().map(|m| manga_dir_name(m)).collect();
+    let orphan_dirs = disk_stats
+        .iter()
+        .filter(|s| !referenced.contains(&s.id))
+        .cloned()
+        .collect();
+
+    // 3. 疑似重复：同名条目分组，页面集合一致（或同名同页数）才报，
+    //    避免把用户故意建的两部同名漫画误判成重复
+    let mut by_title: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    for item in &mangas {
+        by_title.entry(item.title.as_str()).or_default().push(item);
+    }
+    let mut duplicates = Vec::new();
+    for (title, members) in by_title {
+        if members.len() < 2 {
+            continue;
+        }
+        let identical = members
+            .iter()
+            .all(|m| same_page_set(manga_pages(members[0]), manga_pages(m)));
+        let same_count = members
+            .iter()
+            .map(|m| manga_pages(m).len())
+            .collect::<HashSet<_>>()
+            .len()
+            == 1;
+        if !identical && !same_count {
+            continue;
+        }
+        duplicates.push(DuplicateGroup {
+            title: title.to_string(),
+            reason: if identical {
+                "pages_identical"
+            } else {
+                "same_title_same_count"
+            },
+            members: members
+                .iter()
+                .map(|m| {
+                    let stat = stat_by_id.get(manga_dir_name(m).as_str()).copied();
+                    DuplicateMember {
+                        id: m.id.clone(),
+                        pages: manga_pages(m).len(),
+                        images: stat.map(|s| s.images).unwrap_or(0),
+                        bytes: stat.map(|s| s.bytes).unwrap_or(0),
+                        added_at: m.added_at,
+                        progress: m.manga.as_ref().map(|x| x.progress).unwrap_or(0.0),
+                        dir_missing: stat.is_none(),
+                    }
+                })
+                .collect(),
+        });
+    }
+
+    // 4. 索引页数与磁盘图片数不一致（目录还在，但内容对不上）
+    let mut page_drift = Vec::new();
+    for item in &mangas {
+        let Some(stat) = stat_by_id.get(manga_dir_name(item).as_str()).copied() else {
+            continue;
+        };
+        let indexed = manga_pages(item).len();
+        if indexed != stat.images {
+            page_drift.push(PageDrift {
+                id: item.id.clone(),
+                title: item.title.clone(),
+                indexed,
+                on_disk: stat.images,
+            });
+        }
+    }
+
+    HealthReport {
+        indexed: mangas.len(),
+        on_disk: disk_stats.len(),
+        missing_dirs,
+        orphan_dirs,
+        duplicates,
+        page_drift,
+        disk_stats,
+    }
+}
+
+/// 重新扫描漫画目录，把索引里的页数 / 封面 / 缩略图修正为磁盘实况。
+/// 返回是否有变化（没有变化时调用方不必落盘）。
+///
+/// 用于体检里的「索引页数与磁盘不一致」：文件被外部增删、或导入中途
+/// 死去又复用同一个 id 把内容合并进旧目录，都会让索引和磁盘对不上。
+pub fn resync_manga_from_disk(root: &Path, item: &mut Item) -> bool {
+    let Some(meta) = item.manga.as_mut() else {
+        return false;
+    };
+    let dir = root.join(MANGA_DIR_NAME).join(&item.id);
+    let pages = scan_images(&dir);
+    // 封面页还在就保留，否则顺延到第一页；一张不剩就置空
+    let next_cover = match meta.cover.as_ref() {
+        Some(c) if pages.iter().any(|p| p == c) => meta.cover.clone(),
+        _ => pages.first().cloned(),
+    };
+    let cover_changed = next_cover != meta.cover;
+    let changed = cover_changed || pages != meta.pages;
+    meta.pages = pages;
+    if cover_changed {
+        meta.cover = next_cover.clone();
+        // 封面换了缩略图要跟着重做（解码原图，只在真变了时才做）；
+        // 没有封面则清掉残留在 thumbs/ 里的旧图
+        meta.thumb = match next_cover.as_deref() {
+            Some(c) => make_cover_thumb(root, &item.id, c),
+            None => {
+                remove_cover_thumb(root, &item.id);
+                None
+            }
+        };
+    }
+    changed
+}
+
 /// 判断扩展名是否为图片
 pub fn is_image_file(path: &Path) -> bool {    path.extension()
         .and_then(|e| e.to_str())
@@ -1157,5 +1488,158 @@ mod tests {
         // id 互不重复（都走 m 前缀分配）
         assert_ne!(at_root.id, in_folder.id);
         assert!(at_root.id.starts_with('m'));
+    }
+
+    /// 指定标题与页数的漫画条目（体检测试用）
+    fn manga_titled(id: &str, title: &str, pages: &[&str]) -> Item {
+        let mut item = manga(id, None);
+        item.title = title.to_string();
+        item.manga = item.manga.map(|mut m| {
+            m.pages = pages.iter().map(|s| s.to_string()).collect();
+            m
+        });
+        item
+    }
+
+    #[test]
+    fn health_report_flags_missing_orphan_duplicate_and_drift() {
+        let root = temp_dir("health");
+        let manga_root = root.join(MANGA_DIR_NAME);
+        // m1：索引与磁盘一致
+        fs::create_dir_all(manga_root.join("m1")).unwrap();
+        fs::write(manga_root.join("m1/001.jpg"), b"12345").unwrap();
+        fs::write(manga_root.join("m1/002.jpg"), b"123").unwrap();
+        // m2：索引里有条目，磁盘上没有目录（写索引前就死了）
+        // m3：磁盘上有目录，索引里没有（复制完死在写索引前 → 孤儿）
+        fs::create_dir_all(manga_root.join("m3")).unwrap();
+        fs::write(manga_root.join("m3/a.png"), b"1").unwrap();
+        fs::write(manga_root.join("m3/b.png"), b"22").unwrap();
+        fs::write(manga_root.join("m3/notes.txt"), b"xyz").unwrap();
+        // m4 / m5：同名同页面 → 同一部漫画导了两次
+        for id in ["m4", "m5"] {
+            fs::create_dir_all(manga_root.join(id)).unwrap();
+            fs::write(manga_root.join(format!("{id}/001.jpg")), b"12345").unwrap();
+            fs::write(manga_root.join(format!("{id}/002.jpg")), b"123").unwrap();
+        }
+        // m6：索引记 2 页，磁盘只剩 1 张（页数漂移）
+        fs::create_dir_all(manga_root.join("m6")).unwrap();
+        fs::write(manga_root.join("m6/001.jpg"), b"1").unwrap();
+        // m7：空漫画（目录在、没有图片），不该被误报
+        fs::create_dir_all(manga_root.join("m7")).unwrap();
+
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga_titled("m1", "甲", &["001.jpg", "002.jpg"]));
+        idx.items.push(manga_titled("m2", "乙", &["001.jpg"]));
+        idx.items.push(manga_titled("m4", "丙", &["001.jpg", "002.jpg"]));
+        idx.items.push(manga_titled("m5", "丙", &["001.jpg", "002.jpg"]));
+        idx.items.push(manga_titled("m6", "丁", &["001.jpg", "002.jpg"]));
+        idx.items.push(manga_titled("m7", "空", &[]));
+
+        let report = build_health_report(&root, &idx);
+        assert_eq!(report.indexed, 6);
+        assert_eq!(report.on_disk, 6); // m1 m3 m4 m5 m6 m7
+
+        // 索引有条目、目录丢了
+        let missing: Vec<&str> = report.missing_dirs.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(missing, vec!["m2"]);
+        assert_eq!(report.missing_dirs[0].pages, 1);
+
+        // 目录在、索引没有；并报出磁盘实况（3 个文件里 2 张图）
+        let orphans: Vec<&str> = report.orphan_dirs.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(orphans, vec!["m3"]);
+        assert_eq!(report.orphan_dirs[0].files, 3);
+        assert_eq!(report.orphan_dirs[0].images, 2);
+        assert_eq!(report.orphan_dirs[0].bytes, 1 + 2 + 3);
+        assert!(report.orphan_dirs[0].title.is_none());
+
+        // 疑似重复：页面集合完全一致
+        assert_eq!(report.duplicates.len(), 1);
+        let group = &report.duplicates[0];
+        assert_eq!(group.title, "丙");
+        assert_eq!(group.reason, "pages_identical");
+        let members: Vec<&str> = group.members.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(members, vec!["m4", "m5"]);
+        assert!(group.members.iter().all(|m| m.images == 2 && !m.dir_missing));
+
+        // 页数漂移：m6 记 2 页、磁盘 1 张
+        assert_eq!(report.page_drift.len(), 1);
+        assert_eq!(report.page_drift[0].id, "m6");
+        assert_eq!(report.page_drift[0].indexed, 2);
+        assert_eq!(report.page_drift[0].on_disk, 1);
+
+        // 磁盘实况：m1 两个文件、文件名样本、标题来自索引
+        let m1 = report
+            .disk_stats
+            .iter()
+            .find(|s| s.id == "m1")
+            .expect("m1 必须出现在磁盘实况里");
+        assert_eq!((m1.files, m1.images, m1.bytes), (2, 2, 5 + 3));
+        assert_eq!(m1.sample, vec!["001.jpg", "002.jpg"]);
+        assert_eq!(m1.title.as_deref(), Some("甲"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resync_manga_from_disk_repairs_pages_cover_and_thumb() {
+        let root = temp_dir("resync");
+        let dir = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("001.jpg"), b"1").unwrap();
+        fs::write(dir.join("002.jpg"), b"2").unwrap();
+        fs::write(dir.join("003.jpg"), b"3").unwrap();
+
+        let mut item = manga_titled("m1", "甲", &["001.jpg", "002.jpg"]);
+        assert!(resync_manga_from_disk(&root, &mut item));
+        let meta = item.manga.as_ref().unwrap();
+        // 磁盘上多出来的第三页补进索引
+        assert_eq!(meta.pages, vec!["001.jpg", "002.jpg", "003.jpg"]);
+        assert_eq!(meta.cover.as_deref(), Some("001.jpg")); // 封面页还在，保留
+
+        // 封面页被删掉 → 顺延到第一页
+        fs::remove_file(dir.join("001.jpg")).unwrap();
+        assert!(resync_manga_from_disk(&root, &mut item));
+        let meta = item.manga.as_ref().unwrap();
+        assert_eq!(meta.pages, vec!["002.jpg", "003.jpg"]);
+        assert_eq!(meta.cover.as_deref(), Some("002.jpg"));
+
+        // 图片清空 → 页数与封面一起置空
+        fs::remove_file(dir.join("002.jpg")).unwrap();
+        fs::remove_file(dir.join("003.jpg")).unwrap();
+        assert!(resync_manga_from_disk(&root, &mut item));
+        let meta = item.manga.as_ref().unwrap();
+        assert!(meta.pages.is_empty());
+        assert!(meta.cover.is_none());
+        assert!(meta.thumb.is_none());
+
+        // 已经和磁盘一致时返回 false（调用方不必落盘）
+        assert!(!resync_manga_from_disk(&root, &mut item));
+
+        // 文件夹没有 manga 元数据，直接返回 false
+        let mut folder_item = folder("f1", None);
+        assert!(!resync_manga_from_disk(&root, &mut folder_item));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn health_report_ignores_same_title_with_different_pages() {
+        let root = temp_dir("health-same-title");
+        let manga_root = root.join(MANGA_DIR_NAME);
+        for id in ["m1", "m2"] {
+            fs::create_dir_all(manga_root.join(id)).unwrap();
+            fs::write(manga_root.join(format!("{id}/001.jpg")), b"1").unwrap();
+        }
+        // 同名但页数不同：更可能是用户故意建的两部，不报重复
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga_titled("m1", "同名", &["001.jpg"]));
+        idx.items.push(manga_titled("m2", "同名", &["001.jpg", "002.jpg"]));
+
+        let report = build_health_report(&root, &idx);
+        assert!(report.duplicates.is_empty());
+        assert!(report.missing_dirs.is_empty());
+        assert!(report.orphan_dirs.is_empty());
+
+        fs::remove_dir_all(&root).ok();
     }
 }

@@ -1,11 +1,12 @@
 //! Tauri 命令层：书库快照、文件夹、重命名、删除、移动、排序与阅读进度。
 
 use crate::library::{
-    copy_dir_all, copy_images_into_manga, delete_manga_files, dir_total_bytes, extract_zip,
-    make_cover_thumb, now_unix, remove_cover_thumb, same_page_set, scan_images, title_from_path,
-    zip_total_bytes, Item, ItemKind, LibraryIndex, MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
+    build_health_report, copy_dir_all, copy_images_into_manga, delete_manga_files,
+    dir_total_bytes, extract_zip, make_cover_thumb, now_unix, remove_cover_thumb, same_page_set,
+    scan_images, title_from_path, zip_total_bytes, HealthReport, Item, ItemKind, LibraryIndex,
+    MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -259,6 +260,108 @@ pub fn reorder(
     let mut st = lock(&state)?;
     st.index.set_order(parent.as_deref(), ordered_ids)?;
     st.save()
+}
+
+/// 按磁盘实况重新扫描某部漫画：页数、封面（封面页不见了会顺延）与缩略图。
+/// 体检里「索引页数与磁盘不一致」的修复入口。
+#[tauri::command]
+pub fn rescan_manga_pages(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+) -> Result<Item, String> {
+    let root = lock(&state)?.root.clone();
+    let mut st = lock(&state)?;
+    let item = st
+        .index
+        .item_mut(&id)
+        .ok_or_else(|| "条目不存在".to_string())?;
+    if item.manga.is_none() {
+        return Err("该条目不是漫画".to_string());
+    }
+    crate::library::resync_manga_from_disk(&root, item);
+    let updated = item.clone();
+    st.save()?;
+    Ok(updated)
+}
+
+/// 书库体检：把磁盘实况与索引对比，找出「索引有条目但目录丢了」、
+/// 「目录在磁盘上但索引里没有（孤儿）」、「疑似重复导入」与「索引页数
+/// 和磁盘不一致」，并列出每个漫画目录里实际有什么。
+///
+/// 用户看不到应用内部目录，导入中途被杀后留下的对不上的状态只能这样
+/// 翻到明面上；配合 `library_health_clean` 清理。
+#[tauri::command]
+pub fn library_health(state: State<'_, Mutex<AppState>>) -> Result<HealthReport, String> {
+    // 取出根目录与索引副本后再扫盘：扫盘要读几千个文件的元数据，
+    // 不该一直持有状态锁（否则书架快照请求会被堵住）
+    let (root, index) = {
+        let st = lock(&state)?;
+        (st.root.clone(), st.index.clone())
+    };
+    Ok(build_health_report(&root, &index))
+}
+
+/// 体检清理：按前端的判断移除书架条目与 / 或删除磁盘目录。
+///
+/// 每条目标自带「要不要连文件一起删」：
+/// - 索引里的漫画 → 从书架移除；`delete_files` 时连 `manga/<id>/` 与
+///   封面缩略图一起删（与 `delete_items` 的磁盘口径一致）
+/// - 索引里没有的孤儿目录 → 只允许 `delete_files`（书架上没有它可移除）
+#[derive(Debug, Clone, Deserialize)]
+pub struct HealthCleanup {
+    pub id: String,
+    pub delete_files: bool,
+}
+
+#[tauri::command]
+pub fn library_health_clean(
+    state: State<'_, Mutex<AppState>>,
+    targets: Vec<HealthCleanup>,
+) -> Result<usize, String> {
+    if targets.is_empty() {
+        return Ok(0);
+    }
+    let mut st = lock(&state)?;
+    let mut cleaned = 0usize;
+    for target in &targets {
+        // id 直接参与拼路径，挡住穿越与奇怪字符
+        let id = target.id.trim();
+        if id.is_empty()
+            || id.contains(['/', '\\'])
+            || id.split('/').any(|c| c == "..")
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(format!("非法条目 id: {}", target.id));
+        }
+        let dir = st.root.join(MANGA_DIR_NAME).join(id);
+        // 体检只针对漫画条目：文件夹不会被报出来，这里也一并挡掉
+        let in_index = st
+            .index
+            .item(id)
+            .is_some_and(|i| i.kind == ItemKind::Manga);
+        if !in_index && !dir.is_dir() {
+            return Err(format!("找不到 {id}：索引与磁盘上都没有"));
+        }
+        if in_index {
+            // 漫画没有子条目，等价于普通移除；顺带清掉排序表里的引用
+            st.index.remove_recursive(id);
+        } else if !target.delete_files {
+            // 孤儿目录在书架上没有条目可移除，只能连文件一起删
+            return Err(format!("{id} 只是磁盘上的目录（索引里没有），只能连同文件一起删除"));
+        }
+        if target.delete_files {
+            if dir.is_dir() {
+                std::fs::remove_dir_all(&dir)
+                    .map_err(|e| format!("删除目录失败 {}: {e}", dir.display()))?;
+            }
+            remove_cover_thumb(&st.root, id);
+        }
+        cleaned += 1;
+    }
+    st.save()?;
+    Ok(cleaned)
 }
 
 /// 保存阅读进度（0.0 - 1.0）
