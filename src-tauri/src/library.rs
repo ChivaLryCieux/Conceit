@@ -595,7 +595,8 @@ fn walk_files(dir: &Path, out: &mut dyn FnMut(&Path)) {
     }
 }
 
-/// 遍历 `manga/` 下每个目录，统计文件数 / 图片数 / 字节数并取文件名样本
+/// 遍历 `manga/` 下每个目录，统计文件数 / 图片数 / 字节数并取文件名样本。
+/// 一次遍历同时算出图片数（与 [`scan_images`] 同一套跳过规则），不再各走一遍。
 fn scan_manga_dirs(manga_root: &Path) -> Vec<DirStat> {
     let mut out: Vec<DirStat> = Vec::new();
     let Ok(entries) = fs::read_dir(manga_root) else {
@@ -614,10 +615,14 @@ fn scan_manga_dirs(manga_root: &Path) -> Vec<DirStat> {
             .to_string_lossy()
             .to_string();
         let mut files = 0usize;
+        let mut images = 0usize;
         let mut bytes = 0u64;
         let mut names: Vec<String> = Vec::new();
         walk_files(&dir, &mut |path| {
             files += 1;
+            if is_image_file(path) {
+                images += 1;
+            }
             if let Ok(meta) = fs::metadata(path) {
                 bytes += meta.len();
             }
@@ -631,7 +636,7 @@ fn scan_manga_dirs(manga_root: &Path) -> Vec<DirStat> {
             id,
             title: None,
             files,
-            images: scan_images(&dir).len(),
+            images,
             bytes,
             sample: names,
         });
