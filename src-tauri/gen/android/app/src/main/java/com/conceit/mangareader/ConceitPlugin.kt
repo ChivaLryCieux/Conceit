@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import android.util.Log
 import androidx.activity.result.ActivityResult
 import androidx.core.view.WindowInsetsCompat
 import app.tauri.Logger
@@ -169,8 +170,14 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     Thread {
       try {
         // 目录名取自所选文件夹的显示名，导入后的漫画标题才有意义
+        val cacheRoot = File(activity.cacheDir, "tree-import")
+        val cacheExisted = cacheRoot.exists()
         val dest = File(prepareDir("tree-import", wipe = true), treeDisplayName(treeUri))
         dest.mkdirs()
+        Log.i(
+          "ConceitImport",
+          "SAF 目录选择返回 $treeUri; 缓存目录${if (cacheExisted) "有残留(已清空重建)" else "为空"} → ${dest.absolutePath}"
+        )
         // 安卓导入是「SAF 拷进缓存 + Rust 再拷进书库」两份占用，拷到一半
         // 空间不足只会得到一条错误、白等几分钟。先按目录总大小预估，不够
         // 就提前拒绝；提供者不给文件大小时放弃预估、照常导入。
@@ -179,6 +186,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
           val usable = activity.cacheDir.usableSpace
           val need = total * 2 + 64L * 1024 * 1024
           if (usable < need) {
+            Log.e("ConceitImport", "存储空间不足: 需 ${need / 1024 / 1024}MB, 可用 ${usable / 1024 / 1024}MB")
             rejectOnUi(
               invoke,
               "存储空间不足：导入约需 ${need / 1024 / 1024}MB，当前可用 ${usable / 1024 / 1024}MB"
@@ -189,14 +197,21 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         val channel = parseChannel(invoke)
         val title = dest.name
         var done = 0L
+        var count = 0
         copyTree(treeUri, dest) { n ->
           done += n
+          count += 1
           reportCopy(channel, 1, 1, title, done, total ?: 0L)
         }
+        // 磁盘上的文件数多于本次复制数，说明缓存里有上一次导入的残留——
+        // 这正是「一部漫画出现两份」的典型成因
+        val onDisk = dest.walkTopDown().count { it.isFile }
+        Log.i("ConceitImport", "SAF 复制完成: 本次 $count 个 / 磁盘共 $onDisk 个 / $done 字节 → ${dest.absolutePath}")
         resolveOnUi(invoke) { JSObject().put("path", dest.absolutePath) }
       } catch (e: Throwable) {
         // Throwable 而非 Exception：OOM、StackOverflowError 也要能转成一条
         // 错误提示，而不是未捕获异常直接杀掉进程（用户看到的就是闪退）
+        Log.e("ConceitImport", "SAF 复制失败: ${e.javaClass.name}: ${e.message}", e)
         rejectOnUi(invoke, e.message ?: "读取所选目录失败")
       }
     }.start()

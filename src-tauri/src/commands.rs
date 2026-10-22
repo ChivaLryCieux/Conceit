@@ -428,10 +428,16 @@ pub fn import_sources(
         }
     }
     let total_items = paths.len();
+    eprintln!(
+        "[import] import_sources 开始: {} 个路径, 目标文件夹 {:?}",
+        paths.len(),
+        target_folder
+    );
     let mut imported: Vec<Item> = Vec::new();
     for (idx, path_str) in paths.iter().enumerate() {
         let src = PathBuf::from(path_str);
         if !src.exists() {
+            eprintln!("[import] 失败: 路径不存在 {path_str}");
             return Err(format!("路径不存在: {path_str}"));
         }
         let is_zip = src.is_file()
@@ -441,11 +447,18 @@ pub fn import_sources(
                 .map(|e| e.eq_ignore_ascii_case("zip"))
                 .unwrap_or(false);
         if !src.is_dir() && !is_zip {
+            eprintln!("[import] 失败: 不支持的来源 {path_str}");
             return Err(format!("仅支持导入文件夹或 zip 压缩包: {path_str}"));
         }
 
         let title = title_from_path(&src);
         let id = st.index.next_id(ItemKind::Manga);
+        eprintln!(
+            "[import] {}/{} 《{}》开始 (id={id}, 源: {path_str})",
+            idx + 1,
+            total_items,
+            title
+        );
         let rel_dir = format!("{MANGA_DIR_NAME}/{id}");
         let dest = st.root.join(&rel_dir);
 
@@ -481,10 +494,12 @@ pub fn import_sources(
 
         if is_zip {
             if let Err(e) = extract_zip(&src, &dest, &mut on_progress) {
+                eprintln!("[import] {id} 解压失败: {e}");
                 cleanup_partial_import(&dest);
                 return Err(e);
             }
         } else if let Err(e) = copy_dir_all(&src, &dest, &mut on_progress) {
+            eprintln!("[import] {id} 复制失败: {e}");
             cleanup_partial_import(&dest);
             return Err(e);
         }
@@ -513,11 +528,30 @@ pub fn import_sources(
             }),
             added_at: now_unix(),
         };
+        eprintln!(
+            "[import] {id} 复制与封面处理完成: {} 页 / {} 字节 / 缩略图 {}",
+            item.manga.as_ref().map(|m| m.pages.len()).unwrap_or(0),
+            done_bytes,
+            if item.manga.as_ref().and_then(|m| m.thumb.as_deref()).is_some() {
+                "有"
+            } else {
+                "无"
+            }
+        );
         st.index.items.push(item.clone());
         st.index.attach(&id, target_folder.as_deref());
         imported.push(item);
     }
     st.save()?;
+    eprintln!(
+        "[import] 索引已落盘, 本次导入 {} 部: {}",
+        imported.len(),
+        imported
+            .iter()
+            .map(|i| format!("{}《{}》", i.id, i.title))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     Ok(imported)
 }
 
