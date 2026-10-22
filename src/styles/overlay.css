@@ -512,6 +512,14 @@
   color: var(--danger);
 }
 
+/* 一行右侧的操作按钮组（可能有两个：收进书架 + 删除目录） */
+.health-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .health-sample {
   color: var(--text-dim);
   overflow: hidden;

@@ -234,6 +234,7 @@ export default function Shelf({
           onClose={() => setHealthOpen(false)}
           onChanged={() => onReload()}
           onToast={onToast}
+          parentId={currentFolder}
         />
       )}
 

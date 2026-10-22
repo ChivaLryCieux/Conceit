@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Modal from "./ui/Modal";
 import ConfirmDialog from "./ui/ConfirmDialog";
+import InputDialog from "./ui/InputDialog";
 import {
+  adoptMangaDir,
   libraryHealth,
   libraryHealthClean,
   rescanMangaPages,
@@ -11,9 +13,11 @@ import type { DirStat, HealthReport, Toast } from "../types";
 
 interface Props {
   onClose: () => void;
-  /** 清理 / 重新扫描后通知书架刷新 */
+  /** 清理 / 重新扫描 / 收进书架后通知书架刷新 */
   onChanged: () => void | Promise<void>;
   onToast: (text: string, tone?: Toast["tone"]) => void;
+  /** 收进书架时放进哪个文件夹（当前所在目录） */
+  parentId?: string | null;
 }
 
 /** 待确认的破坏性操作 */
@@ -69,11 +73,14 @@ export default function LibraryHealth({
   onClose,
   onChanged,
   onToast,
+  parentId = null,
 }: Props) {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [scanning, setScanning] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  /** 正要收进书架的孤儿目录（先问名字） */
+  const [adopting, setAdopting] = useState<DirStat | null>(null);
   const [working, setWorking] = useState(false);
   const [showDiskStats, setShowDiskStats] = useState(false);
 
@@ -118,6 +125,25 @@ export default function LibraryHealth({
       await scan();
     } catch (e) {
       onToast(`重新扫描失败：${e}`, "error");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  /** 把孤儿目录收进书架：文件已经在磁盘上，只补索引，不复制 */
+  async function adopt(stat: DirStat, title: string) {
+    setWorking(true);
+    try {
+      await adoptMangaDir(stat.id, title, parentId);
+      onToast(
+        `已把目录 ${stat.id} 收进书架（${stat.images} 张图，未复制文件）`,
+        "success"
+      );
+      setAdopting(null);
+      await onChanged();
+      await scan();
+    } catch (e) {
+      onToast(`收进书架失败：${e}`, "error");
     } finally {
       setWorking(false);
     }
@@ -185,20 +211,21 @@ export default function LibraryHealth({
                       <span className="health-name">《{m.title}》</span>
                       <span className="health-stat">索引记录 {m.pages} 页</span>
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      disabled={working}
-                      onClick={() =>
-                        setPending({
-                          message: `把《${m.title}》从书架移除吗？它的图片目录已经不在磁盘上，此操作不可恢复。`,
-                          targets: [{ id: m.id, deleteFiles: false }],
-                        })
-                      }
-                    >
-                      从书架移除
-                    </button>
-                  </div>
+                    <div className="health-actions">
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        disabled={working}
+                        onClick={() =>
+                          setPending({
+                            message: `把《${m.title}》从书架移除吗？它的图片目录已经不在磁盘上，此操作不可恢复。`,
+                            targets: [{ id: m.id, deleteFiles: false }],
+                          })
+                        }
+                      >
+                        从书架移除
+                      </button>
+                    </div>                  </div>
                 ))}
               </section>
             )}
@@ -210,8 +237,9 @@ export default function LibraryHealth({
                   磁盘上有目录、索引里没有（{report.orphan_dirs.length}）
                 </h3>
                 <p className="settings-hint">
-                  导入死在「复制文件」与「写索引」之间就会留下这种目录：书架上看不见，
-                  却一直占着空间。删除前可以先看下面的文件名确认内容。
+                  导入死在「复制文件」与「写索引」之间就会留下这种目录：图片其实
+                  已经复制进书库了，只是索引没记，书架上看不见。可以给它起个名字
+                  <strong>收进书架</strong>（不复制文件，直接读现有目录），确认没用的再删掉。
                 </p>
                 {report.orphan_dirs.map((d) => (
                   <div className="health-row" key={d.id}>
@@ -220,21 +248,31 @@ export default function LibraryHealth({
                       <span className="health-name">（索引中没有）</span>
                       <DirStatLine stat={d} />
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      disabled={working}
-                      onClick={() =>
-                        setPending({
-                          message: `删除目录 ${d.id}（${d.files} 个文件 / ${formatBytes(
-                            d.bytes
-                          )}）吗？它不在索引里，书架上看不到，删除后无法恢复。`,
-                          targets: [{ id: d.id, deleteFiles: true }],
-                        })
-                      }
-                    >
-                      删除目录
-                    </button>
+                    <div className="health-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={working}
+                        onClick={() => setAdopting(d)}
+                      >
+                        收进书架
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        disabled={working}
+                        onClick={() =>
+                          setPending({
+                            message: `删除目录 ${d.id}（${d.files} 个文件 / ${formatBytes(
+                              d.bytes
+                            )}）吗？它不在索引里，书架上看不到，删除后无法恢复。`,
+                            targets: [{ id: d.id, deleteFiles: true }],
+                          })
+                        }
+                      >
+                        删除目录
+                      </button>
+                    </div>
                   </div>
                 ))}
               </section>
@@ -275,23 +313,25 @@ export default function LibraryHealth({
                             </span>
                           )}
                         </div>
-                        <button
-                          type="button"
-                          className="btn btn-danger"
-                          disabled={working}
-                          onClick={() =>
-                            setPending({
-                              message: `删除《${group.title}》的 ${m.id} 这份吗？连磁盘目录一起删${
-                                m.dir_missing
-                                  ? "（目录已丢失，只会移除书架条目）"
-                                  : ""
-                              }，无法恢复。`,
-                              targets: [{ id: m.id, deleteFiles: true }],
-                            })
-                          }
-                        >
-                          删除这一份
-                        </button>
+                        <div className="health-actions">
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            disabled={working}
+                            onClick={() =>
+                              setPending({
+                                message: `删除《${group.title}》的 ${m.id} 这份吗？连磁盘目录一起删${
+                                  m.dir_missing
+                                    ? "（目录已丢失，只会移除书架条目）"
+                                    : ""
+                                }，无法恢复。`,
+                                targets: [{ id: m.id, deleteFiles: true }],
+                              })
+                            }
+                          >
+                            删除这一份
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -318,14 +358,16 @@ export default function LibraryHealth({
                         索引 {d.indexed} 页 / 磁盘 {d.on_disk} 张图
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={working}
-                      onClick={() => void rescan(d.id, d.title)}
-                    >
-                      按磁盘重新扫描
-                    </button>
+                    <div className="health-actions">
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={working}
+                        onClick={() => void rescan(d.id, d.title)}
+                      >
+                        按磁盘重新扫描
+                      </button>
+                    </div>
                   </div>
                 ))}
               </section>
@@ -369,6 +411,18 @@ export default function LibraryHealth({
           danger
           onConfirm={() => runCleanup(pending)}
           onClose={() => setPending(null)}
+        />
+      )}
+
+      {/* 收进书架要先问名字：目录名是 m3 这种内部 id，不能直接当标题 */}
+      {adopting && (
+        <InputDialog
+          title="收进书架"
+          label="漫画名称"
+          placeholder="例如：海贼王"
+          confirmText="收进书架"
+          onConfirm={(name) => adopt(adopting, name)}
+          onClose={() => setAdopting(null)}
         />
       )}
     </>

@@ -126,6 +126,15 @@ export async function rescanMangaPages(id: string): Promise<Item> {
   return invoke<Item>("rescan_manga_pages", { id });
 }
 
+/** 把磁盘上已有的漫画目录收进书架（不复制文件），返回新条目 */
+export async function adoptMangaDir(
+  id: string,
+  title: string,
+  parent: string | null
+): Promise<Item> {
+  return invoke<Item>("adopt_manga_dir", { id, title, parent });
+}
+
 export async function fetchPages(id: string): Promise<string[]> {
   return invoke<string[]>("manga_pages", { id });
 }
