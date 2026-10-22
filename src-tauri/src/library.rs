@@ -303,6 +303,79 @@ impl LibraryIndex {
         self.attach(&id, parent);
         item
     }
+
+    /// 把磁盘上已有的漫画目录收进书架——体检里「孤儿目录」的正向处理。
+    ///
+    /// 导入死在「复制文件」与「写索引」之间时，图片已经躺在 `manga/<id>/`
+    /// 里，只是索引里没有条目、书架上看不见。这里按现有目录补一条索引，
+    /// **不复制、不移动任何文件**：id 沿用目录名，封面取第一页并生成缩略图，
+    /// 结果与正常导入一致。用户看不到应用内部目录，这是唯一能把它们捞回来的路。
+    ///
+    /// 目录里一张图片都没有时返回错误：空目录更可能是没复制完的残骸，
+    /// 该让用户删掉，而不是变成一部点进去空白的漫画。
+    pub fn adopt_manga_dir(
+        &mut self,
+        root: &Path,
+        id: &str,
+        title: &str,
+        parent: Option<&str>,
+    ) -> Result<Item, String> {
+        if self.item(id).is_some() {
+            return Err(format!("id {id} 已被占用"));
+        }
+        // 目录名即 id：若索引里已有条目指向同一目录，收进来就是两部漫画
+        // 共享一份文件，删一部会连掉另一部的图
+        if self
+            .items
+            .iter()
+            .any(|i| i.kind == ItemKind::Manga && manga_dir_name(i) == id)
+        {
+            return Err(format!("目录 {MANGA_DIR_NAME}/{id} 已被索引里的条目占用"));
+        }
+        let dir = root.join(MANGA_DIR_NAME).join(id);
+        let pages = scan_images(&dir);
+        if pages.is_empty() {
+            return Err(format!("目录 {MANGA_DIR_NAME}/{id} 里没有图片"));
+        }
+        let cover = pages.first().cloned();
+        let thumb = cover.as_deref().and_then(|c| make_cover_thumb(root, id, c));
+        let item = Item {
+            id: id.to_string(),
+            kind: ItemKind::Manga,
+            title: title.to_string(),
+            parent: parent.map(|s| s.to_string()),
+            show_cover: false,
+            manga: Some(MangaMeta {
+                dir: format!("{MANGA_DIR_NAME}/{id}"),
+                cover,
+                thumb,
+                pages,
+                progress: 0.0,
+            }),
+            added_at: now_unix(),
+        };
+        self.items.push(item.clone());
+        self.attach(id, parent);
+        self.bump_seq_above(id);
+        Ok(item)
+    }
+
+    /// 保证 id 分配计数器高于某个已占用的 id。
+    ///
+    /// 认领磁盘目录沿用目录名当 id（例如 m5），而 next_seq 可能还停在低位；
+    /// 不抬上去的话，之后的导入会再分配到 m5，与刚收进书架的条目撞车，
+    /// 把新文件合并进同一目录——正是体检要治的那个病。
+    fn bump_seq_above(&mut self, id: &str) {
+        if let Some(seq) = id
+            .strip_prefix('m')
+            .or_else(|| id.strip_prefix('f'))
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            if self.next_seq <= seq {
+                self.next_seq = seq + 1;
+            }
+        }
+    }
 }
 
 /// 在内存预算内解码一张图片；超预算、格式不支持或解码器内部 panic 时返回 None。
@@ -1623,6 +1696,76 @@ mod tests {
         // 文件夹没有 manga 元数据，直接返回 false
         let mut folder_item = folder("f1", None);
         assert!(!resync_manga_from_disk(&root, &mut folder_item));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn adopt_manga_dir_registers_orphan_directory() {
+        let root = temp_dir("adopt");
+        // 磁盘上有一份没被索引记下的目录（导入死在写索引前）
+        let dir = root.join(MANGA_DIR_NAME).join("m3");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("002.jpg"), b"2").unwrap();
+        fs::write(dir.join("001.jpg"), b"1").unwrap();
+        fs::write(dir.join("readme.txt"), b"x").unwrap();
+
+        let mut idx = LibraryIndex::default();
+        assert_eq!(idx.next_seq, 1);
+        let item = idx
+            .adopt_manga_dir(&root, "m3", "失而复得", Some("f1"))
+            .expect("应能收进书架");
+
+        // id 沿用目录名，页数 = 磁盘上的图片（txt 不算），封面取第一页
+        assert_eq!(item.id, "m3");
+        assert_eq!(item.parent.as_deref(), Some("f1"));
+        let meta = item.manga.as_ref().unwrap();
+        assert_eq!(meta.dir, "manga/m3");
+        assert_eq!(meta.pages, vec!["001.jpg", "002.jpg"]);
+        assert_eq!(meta.cover.as_deref(), Some("001.jpg"));
+        assert_eq!(meta.progress, 0.0);
+        // 假图片解不出缩略图，回退原图封面（与导入路径一致）
+        assert!(meta.thumb.is_none());
+        assert_eq!(idx.item("m3").unwrap().title, "失而复得");
+        assert_eq!(idx.children(Some("f1")).len(), 1);
+
+        // 计数器抬到 m3 之上：之后的导入不会再来抢 m3 这个目录
+        assert_eq!(idx.next_seq, 4);
+        assert_eq!(idx.next_id(ItemKind::Manga), "m4");
+    }
+
+    #[test]
+    fn adopt_manga_dir_rejects_conflicts_and_empty_dirs() {
+        let root = temp_dir("adopt-bad");
+        let manga_root = root.join(MANGA_DIR_NAME);
+
+        // 空目录：没复制完的残骸，不许收
+        fs::create_dir_all(manga_root.join("m1")).unwrap();
+        let mut idx = LibraryIndex::default();
+        let err = idx
+            .adopt_manga_dir(&root, "m1", "空", None)
+            .expect_err("空目录不该被收进书架");
+        assert!(err.contains("没有图片"), "实际: {err}");
+
+        // id 已被占用
+        let mut with_item = LibraryIndex::default();
+        with_item.items.push(manga("m2", None));
+        let err = with_item
+            .adopt_manga_dir(&root, "m2", "重名", None)
+            .expect_err("id 已存在");
+        assert!(err.contains("已被占用"), "实际: {err}");
+
+        // 目录名撞车：索引里 m9 指着 manga/m3，不能把 m3 再收一遍
+        let mut odd = LibraryIndex::default();
+        let mut m9 = manga("m9", None);
+        m9.manga.as_mut().unwrap().dir = "manga/m3".to_string();
+        odd.items.push(m9);
+        fs::create_dir_all(manga_root.join("m3")).unwrap();
+        fs::write(manga_root.join("m3/001.jpg"), b"1").unwrap();
+        let err = odd
+            .adopt_manga_dir(&root, "m3", "撞车", None)
+            .expect_err("目录已被别的条目占用");
+        assert!(err.contains("已被索引里的条目占用"), "实际: {err}");
 
         fs::remove_dir_all(&root).ok();
     }

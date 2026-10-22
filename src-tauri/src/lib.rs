@@ -49,6 +49,7 @@ pub fn run() {
             commands::save_progress,
             commands::library_health,
             commands::library_health_clean,
+            commands::adopt_manga_dir,
             commands::rescan_manga_pages,
             commands::manga_pages,
             commands::suggest_title,

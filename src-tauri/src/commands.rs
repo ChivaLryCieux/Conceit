@@ -284,6 +284,46 @@ pub fn rescan_manga_pages(
     Ok(updated)
 }
 
+/// 把磁盘上已有的漫画目录收进书架（体检里「孤儿目录」的正向处理）。
+///
+/// 文件已经在 `manga/<id>/` 里，只是索引没记：这里只补索引、不碰文件，
+/// id 沿用目录名，封面取第一页。用户在书架 / 体检里看不到内部目录，
+/// 这是把「目录里有但前端没显示」的漫画捞回书架的唯一入口。
+#[tauri::command]
+pub fn adopt_manga_dir(
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    title: String,
+    parent: Option<String>,
+) -> Result<Item, String> {
+    // id 直接参与拼路径，白名单与体检清理一致
+    let id = id.trim();
+    if id.is_empty()
+        || id.contains(['/', '\\'])
+        || id.split('/').any(|c| c == "..")
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("非法目录 id: {}", id));
+    }
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("漫画名称不能为空".to_string());
+    }
+    // 空字符串当作根目录（前端传 null 或省略都视为根）
+    let parent = parent
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    let root = lock(&state)?.root.clone();
+    let mut st = lock(&state)?;
+    let item = st
+        .index
+        .adopt_manga_dir(&root, id, title, parent.as_deref())?;
+    st.save()?;
+    Ok(item)
+}
+
 /// 书库体检：把磁盘实况与索引对比，找出「索引有条目但目录丢了」、
 /// 「目录在磁盘上但索引里没有（孤儿）」、「疑似重复导入」与「索引页数
 /// 和磁盘不一致」，并列出每个漫画目录里实际有什么。
