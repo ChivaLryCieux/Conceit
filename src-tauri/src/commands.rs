@@ -556,6 +556,14 @@ pub fn backfill_thumbnails(state: &State<'_, Mutex<AppState>>) -> Result<usize, 
 ///
 /// `channel` 用于把复制 / 解压的字节进度实时推给前端（进度条）；
 /// 桌面端同样可用，调用方传一个不监听的对象即可。
+///
+/// 加锁分三段（与 `backfill_thumbnails` 同一模式）：复制 / 解压 / 生成缩略图
+/// 可能持续数分钟，全程持锁会堵住 `manga_pages`、`save_progress`、
+/// `library_snapshot` 等所有命令——用户边导入边打开漫画就会卡死。因此：
+/// 1. 短锁校验目标文件夹、取书库根目录；
+/// 2. 每部漫画先短锁分配 id，随后**不持锁**做全部磁盘 IO；
+/// 3. 再短锁登记条目并**立即落盘**——多部导入中途失败时，已完成的部
+///    不会停留在「内存有、磁盘无」的中间态。
 #[tauri::command]
 pub fn import_sources(
     state: State<'_, Mutex<AppState>>,
@@ -563,13 +571,16 @@ pub fn import_sources(
     target_folder: Option<String>,
     channel: Channel,
 ) -> Result<Vec<Item>, String> {
-    let mut st = lock(&state)?;
-    if let Some(p) = &target_folder {
-        match st.index.item(p) {
-            Some(item) if item.kind == ItemKind::Folder => {}
-            _ => return Err("目标文件夹不存在".to_string()),
+    let root = {
+        let st = lock(&state)?;
+        if let Some(p) = &target_folder {
+            match st.index.item(p) {
+                Some(item) if item.kind == ItemKind::Folder => {}
+                _ => return Err("目标文件夹不存在".to_string()),
+            }
         }
-    }
+        st.root.clone()
+    };
     let total_items = paths.len();
     eprintln!(
         "[import] import_sources 开始: {} 个路径, 目标文件夹 {:?}",
@@ -595,7 +606,11 @@ pub fn import_sources(
         }
 
         let title = title_from_path(&src);
-        let id = st.index.next_id(ItemKind::Manga);
+        // id 分配需要短暂持锁，保证并发导入不会拿到同一个号
+        let id = {
+            let mut st = lock(&state)?;
+            st.index.next_id(ItemKind::Manga)
+        };
         eprintln!(
             "[import] {}/{} 《{}》开始 (id={id}, 源: {path_str})",
             idx + 1,
@@ -603,7 +618,7 @@ pub fn import_sources(
             title
         );
         let rel_dir = format!("{MANGA_DIR_NAME}/{id}");
-        let dest = st.root.join(&rel_dir);
+        let dest = root.join(&rel_dir);
 
         // 进度上报：总量先按元数据估出来（0 = 估不出，前端走不确定态），
         // 复制过程中按文件节流到约 10 次/秒，避免小文件多时刷爆 IPC
@@ -653,9 +668,7 @@ pub fn import_sources(
         let cover = pages.first().cloned();
         // 生成封面缩略图可能要点时间（解码原图），单独一个阶段让进度条有话说
         send("thumb", total_bytes.max(done_bytes));
-        let thumb = cover
-            .as_deref()
-            .and_then(|c| make_cover_thumb(&st.root, &id, c));
+        let thumb = cover.as_deref().and_then(|c| make_cover_thumb(&root, &id, c));
         let item = Item {
             id: id.clone(),
             kind: ItemKind::Manga,
@@ -681,13 +694,18 @@ pub fn import_sources(
                 "无"
             }
         );
-        st.index.items.push(item.clone());
-        st.index.attach(&id, target_folder.as_deref());
+        {
+            let mut st = lock(&state)?;
+            st.index.items.push(item.clone());
+            st.index.attach(&id, target_folder.as_deref());
+            // 逐部落盘：后面的部失败时，已导入的部不会只在内存里
+            st.save()?;
+        }
+        eprintln!("[import] 索引已落盘: {}《{}》", item.id, item.title);
         imported.push(item);
     }
-    st.save()?;
     eprintln!(
-        "[import] 索引已落盘, 本次导入 {} 部: {}",
+        "[import] 本次导入 {} 部: {}",
         imported.len(),
         imported
             .iter()
