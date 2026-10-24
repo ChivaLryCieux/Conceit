@@ -189,8 +189,12 @@
 }
 
 .folder-icon {
-  font-size: 44px;
   line-height: 1;
+  display: inline-flex;
+}
+
+.folder-icon svg {
+  display: block;
 }
 
 .folder-count {

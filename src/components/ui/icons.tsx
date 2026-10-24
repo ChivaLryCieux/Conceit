@@ -23,6 +23,25 @@ export function BookLogo({ size = 22 }: IconProps) {
   );
 }
 
+/** 文件夹卡片的大图标（书架封面上用，比操作图标大得多） */
+export function FolderIcon({ size = 44 }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 18.4a1.8 1.8 0 0 1-1.8 1.8H4.8A1.8 1.8 0 0 1 3 18.4V6a1.8 1.8 0 0 1 1.8-1.8h4.4c.6 0 1.1.3 1.4.8l.9 1.4c.3.5.8.8 1.4.8h6.3A1.8 1.8 0 0 1 21 9z" />
+    </svg>
+  );
+}
+
 export function GearIcon({ size = 15 }: IconProps) {
   return (
     <svg

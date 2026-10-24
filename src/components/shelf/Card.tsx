@@ -1,5 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { GearIcon } from "../ui/icons";
+import { FolderIcon, GearIcon } from "../ui/icons";
 import type { Item } from "../../types";
 
 export type DropMode = "before" | "after" | "into";
@@ -93,7 +93,9 @@ export default function Card({
       >
         {isFolder ? (
           <div className="card-cover-folder">
-            <span className="folder-icon">📁</span>
+            <span className="folder-icon">
+              <FolderIcon />
+            </span>
             {mangaCount != null && (
               <span className="folder-count">{mangaCount} 部漫画</span>
             )}

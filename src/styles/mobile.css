@@ -165,8 +165,9 @@
     font-size: 34px;
   }
 
-  .folder-icon {
-    font-size: 36px;
+  .folder-icon svg {
+    width: 36px;
+    height: 36px;
   }
 
   .folder-count {
