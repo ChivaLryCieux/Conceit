@@ -12,6 +12,9 @@ export interface MangaMeta {
   thumb?: string;
   /** 全部图片相对路径（自然排序） */
   pages: string[];
+  /** 每页图片像素尺寸 [宽, 高]，键为 pages 里的相对路径；
+   *  导入时由 Rust 读文件头测得。旧索引可能没有，前端回退估算宽高比 */
+  dims?: Record<string, [number, number]>;
   /** 阅读进度 0-1 */
   progress: number;
 }

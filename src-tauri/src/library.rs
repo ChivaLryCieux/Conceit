@@ -53,6 +53,11 @@ pub struct MangaMeta {
     pub thumb: Option<String>,
     /// 全部图片相对路径（自然排序）
     pub pages: Vec<String>,
+    /// 每页图片的像素尺寸（宽, 高），键为 `pages` 里的相对路径。
+    /// 导入 / 重扫时读文件头测得（不解码像素）；阅读器用它做首屏布局，
+    /// 不必等图片加载后实测高度。旧索引没有该字段时为空，前端回退估算。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dims: BTreeMap<String, (u32, u32)>,
     /// 阅读进度（0.0 - 1.0）
     #[serde(default)]
     pub progress: f64,
@@ -320,6 +325,7 @@ impl LibraryIndex {
                 cover: None,
                 thumb: None,
                 pages: Vec::new(),
+                dims: BTreeMap::new(),
                 progress: 0.0,
             }),
             added_at: now_unix(),
@@ -364,6 +370,7 @@ impl LibraryIndex {
         }
         let cover = pages.first().cloned();
         let thumb = cover.as_deref().and_then(|c| make_cover_thumb(root, id, c));
+        let dims = measure_page_dims(&dir, &pages);
         let item = Item {
             id: id.to_string(),
             kind: ItemKind::Manga,
@@ -375,6 +382,7 @@ impl LibraryIndex {
                 cover,
                 thumb,
                 pages,
+                dims,
                 progress: 0.0,
             }),
             added_at: now_unix(),
@@ -461,6 +469,22 @@ pub fn make_cover_thumb(root: &Path, id: &str, cover_rel: &str) -> Option<String
     enc.encode(rgb.as_raw(), nw, nh, image::ExtendedColorType::Rgb8)
         .ok()?;
     Some(rel)
+}
+
+/// 读每页图片的文件头测像素尺寸（不解码像素，开销极小）。
+/// 读不出（文件损坏 / 格式不支持）或尺寸异常的页直接跳过，
+/// 调用方对缺失的页回退估算。
+pub fn measure_page_dims(manga_dir: &Path, pages: &[String]) -> BTreeMap<String, (u32, u32)> {
+    let mut dims = BTreeMap::new();
+    for p in pages {
+        match image::image_dimensions(manga_dir.join(p)) {
+            Ok((w, h)) if w > 0 && h > 0 => {
+                dims.insert(p.clone(), (w, h));
+            }
+            _ => {}
+        }
+    }
+    dims
 }
 
 /// 删除某部漫画的封面缩略图
@@ -875,8 +899,11 @@ pub fn resync_manga_from_disk(root: &Path, item: &mut Item) -> bool {
         _ => pages.first().cloned(),
     };
     let cover_changed = next_cover != meta.cover;
-    let changed = cover_changed || pages != meta.pages;
+    // 尺寸表按磁盘实况重建：换掉的页拿到新尺寸，删掉的页清掉旧记录
+    let dims = measure_page_dims(&dir, &pages);
+    let changed = cover_changed || pages != meta.pages || meta.dims != dims;
     meta.pages = pages;
+    meta.dims = dims;
     if cover_changed {
         meta.cover = next_cover.clone();
         // 封面换了缩略图要跟着重做（解码原图，只在真变了时才做）；
@@ -1175,6 +1202,7 @@ mod tests {
                 cover: Some("001.jpg".to_string()),
                 thumb: None,
                 pages: vec!["001.jpg".to_string()],
+                dims: BTreeMap::new(),
                 progress: 0.0,
             }),
             added_at: 0,
@@ -1352,6 +1380,33 @@ mod tests {
 
         remove_cover_thumb(&root, "m1");
         assert!(!out.exists());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn measure_page_dims_reads_headers_and_skips_bad_files() {
+        let root = temp_dir("dims");
+        let dir = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(&dir).unwrap();
+        image::RgbImage::from_pixel(600, 900, image::Rgb([1, 2, 3]))
+            .save(dir.join("001.png"))
+            .unwrap();
+        image::RgbImage::from_pixel(300, 200, image::Rgb([1, 2, 3]))
+            .save(dir.join("002.png"))
+            .unwrap();
+        // 坏文件读不出尺寸：跳过即可，不能让整个量取失败
+        fs::write(dir.join("003.jpg"), b"not an image").unwrap();
+
+        let pages = vec![
+            "001.png".to_string(),
+            "002.png".to_string(),
+            "003.jpg".to_string(),
+        ];
+        let dims = measure_page_dims(&dir, &pages);
+        assert_eq!(dims.get("001.png"), Some(&(600, 900)));
+        assert_eq!(dims.get("002.png"), Some(&(300, 200)));
+        assert!(!dims.contains_key("003.jpg"));
+
         fs::remove_dir_all(&root).ok();
     }
 

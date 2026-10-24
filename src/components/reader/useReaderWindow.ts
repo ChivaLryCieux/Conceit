@@ -22,6 +22,8 @@ interface Deps {
   scrollRef: React.RefObject<HTMLDivElement>;
   /** 总页数；变化视为打开了新漫画，重置布局 */
   pageCount: number;
+  /** 每页宽高比（高/宽，来自索引里的尺寸元数据）；undefined = 未知 */
+  aspects: Array<number | undefined>;
   /** 缩放比例：1 = 宽度铺满容器 */
   zoom: number;
   /** 进入时恢复到的阅读进度 0-1 */
@@ -41,8 +43,10 @@ export interface ReaderWindow {
   fractionRef: React.MutableRefObject<number>;
   /** 每页实测高度（px）；0 = 未测量，渲染时回退估计值 */
   heights: number[];
-  /** 估计页高（px） */
+  /** 通用估计页高（px，无尺寸元数据时的粗估） */
   estimate: number;
+  /** 第 i 页的估计高度（px）：有尺寸元数据用真实宽高比 */
+  estimateAt: (index: number) => number;
   /** 窗口上方占位高度（px） */
   spacerTop: number;
   /** 窗口下方占位高度（px） */
@@ -63,14 +67,17 @@ export interface ReaderWindow {
  *  其余页用等高的占位 div 撑出正确的滚动高度与进度比例——
  *  滚动条长度、页码、进度恢复都不受影响，DOM 里的图片则始终只有几张。
  *
- *  高度模型：页高未测量时按「容器宽度 × 1.5」估计；图片 onLoad 后
- *  实测高度写回。测量值在缩放 / 旋屏（宽度变化）时按比例换算，
+ *  高度模型：页高未测量时，索引里有该页的尺寸元数据（Rust 导入时读
+ *  文件头测得）就按真实宽高比估算，首屏布局与进度恢复一次到位；
+ *  没有元数据（旧索引）才退回「容器宽度 × 1.5」的粗估。图片 onLoad
+ *  后实测高度写回。测量值在缩放 / 旋屏（宽度变化）时按比例换算，
  *  图片宽高比不变，换算结果与重新实测一致。
  *  每次布局变化先记录「锚点」（视口顶部所在页 + 页内偏移），
  *  重排后把锚点恢复回去，避免内容跳动。 */
 export function useReaderWindow({
   scrollRef,
   pageCount,
+  aspects,
   zoom,
   progress,
   onSaveProgress,
@@ -93,6 +100,9 @@ export function useReaderWindow({
   const fractionRef = useRef(progress);
   const saveRef = useRef(onSaveProgress);
   saveRef.current = onSaveProgress;
+  /** 每页宽高比（高/宽）；渲染期间保持最新，重置布局的 effect 里读取 */
+  const aspectsRef = useRef(aspects);
+  aspectsRef.current = aspects;
   /** 待恢复的锚点： heights 提交到 DOM 后、绘制前应用 */
   const pendingAnchorRef = useRef<{ index: number; offset: number } | null>(null);
 
@@ -132,16 +142,31 @@ export function useReaderWindow({
       }
     }
     widthRef.current = width;
-    const est = Math.max(ESTIMATE_MIN, Math.round(width * ESTIMATE_ASPECT));
-    setEstimate(est);
+    setEstimate(Math.max(ESTIMATE_MIN, Math.round(width * ESTIMATE_ASPECT)));
+    // 每页估计高度：有尺寸元数据用真实宽高比，否则退回粗估
+    const estOf = (i: number) => {
+      const a = aspectsRef.current[i];
+      return Math.max(ESTIMATE_MIN, Math.round(width * (a ?? ESTIMATE_ASPECT)));
+    };
     const n = heightsRef.current.length;
     const prefix = new Array<number>(n + 1);
     prefix[0] = 0;
     for (let i = 0; i < n; i += 1) {
-      prefix[i + 1] = prefix[i] + (heightsRef.current[i] || est) + PAGE_GAP;
+      prefix[i + 1] = prefix[i] + (heightsRef.current[i] || estOf(i)) + PAGE_GAP;
     }
     prefixRef.current = prefix;
   }, [scrollRef]);
+
+  /** 第 i 页的估计高度（渲染占位用）：真实宽高比优先，粗估兜底 */
+  const estimateAt = useCallback(
+    (i: number) => {
+      const el = scrollRef.current;
+      const width = Math.max(1, el?.clientWidth ?? 1) * zoomRef.current;
+      const a = aspectsRef.current[i];
+      return Math.max(ESTIMATE_MIN, Math.round(width * (a ?? ESTIMATE_ASPECT)));
+    },
+    [scrollRef]
+  );
 
   /** 依据滚动位置刷新渲染窗口 / 当前页 / 进度（含节流保存） */
   const updateWindow = useCallback(() => {
@@ -315,6 +340,7 @@ export function useReaderWindow({
     fractionRef,
     heights,
     estimate,
+    estimateAt,
     spacerTop,
     spacerBottom,
     onScroll,

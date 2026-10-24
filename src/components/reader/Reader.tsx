@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { fetchPages, saveProgress } from "../../api";
 import { useBackHandler } from "../../backHandler";
@@ -58,10 +58,20 @@ export default function Reader({ item, onExit, onToast }: Props) {
     };
   }, [item.id, onToast]);
 
+  /* ---------- 每页宽高比（索引里的尺寸元数据；旧数据没有则回退估算） ---------- */
+  const aspects = useMemo(() => {
+    const dims = item.manga?.dims;
+    return pages.map((p) => {
+      const d = dims?.[p];
+      return d && d[0] > 0 && d[1] > 0 ? d[1] / d[0] : undefined;
+    });
+  }, [pages, item.manga?.dims]);
+
   /* ---------- 窗口化懒加载：渲染范围 / 当前页 / 进度 / 缩放换算 ---------- */
   const win = useReaderWindow({
     scrollRef,
     pageCount: pages.length,
+    aspects,
     zoom,
     progress: item.manga?.progress ?? 0,
     onSaveProgress: useCallback((f: number) => {
@@ -174,7 +184,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
                 <div
                   className="reader-page-slot"
                   key={p}
-                  style={{ height: win.heights[index] || win.estimate }}
+                  style={{ height: win.heights[index] || win.estimateAt(index) }}
                 >
                   <img
                     className="reader-page"
@@ -185,7 +195,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
                     onLoad={(e) =>
                       win.measure(index, e.currentTarget.clientHeight)
                     }
-                    onError={() => win.measure(index, win.estimate)}
+                    onError={() => win.measure(index, win.estimateAt(index))}
                   />
                 </div>
               );

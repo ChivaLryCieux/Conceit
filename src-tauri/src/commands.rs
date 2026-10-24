@@ -710,6 +710,8 @@ pub fn import_sources(
         // 生成封面缩略图可能要点时间（解码原图），单独一个阶段让进度条有话说
         send("thumb", total_bytes.max(done_bytes));
         let thumb = cover.as_deref().and_then(|c| make_cover_thumb(&root, &id, c));
+        // 读每页文件头测尺寸（不解码像素），阅读器首屏布局直接用真实宽高比
+        let dims = crate::library::measure_page_dims(&dest, &pages);
         let item = Item {
             id: id.clone(),
             kind: ItemKind::Manga,
@@ -721,6 +723,7 @@ pub fn import_sources(
                 cover,
                 thumb,
                 pages,
+                dims,
                 progress: 0.0,
             }),
             added_at: now_unix(),
@@ -779,6 +782,9 @@ pub fn add_manga_pages(
     }
     let srcs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
     let added = copy_images_into_manga(&root, &id, &srcs)?;
+    // 新页补上尺寸记录，与 pages 保持同步
+    let manga_dir = root.join(MANGA_DIR_NAME).join(&id);
+    let added_dims = crate::library::measure_page_dims(&manga_dir, &added);
     let item = st
         .index
         .item_mut(&id)
@@ -789,6 +795,7 @@ pub fn add_manga_pages(
         .ok_or_else(|| "该条目不是漫画".to_string())?;
     let had_pages = !meta.pages.is_empty();
     meta.pages.extend(added);
+    meta.dims.extend(added_dims);
     // 页数曾被删光的漫画，补图时顺手把封面补回来
     if !had_pages && meta.cover.is_none() {
         meta.cover = meta.pages.first().cloned();
@@ -839,6 +846,8 @@ pub fn delete_manga_pages(
     delete_manga_files(&root, &id, &pages);
     let deleted: HashSet<String> = pages.into_iter().collect();
     meta.pages.retain(|p| !deleted.contains(p));
+    // 尺寸表同步清理，不留已删页的记录
+    meta.dims.retain(|p, _| !deleted.contains(p));
     // 封面页被删 → 顺延到当前第一页，缩略图跟着重建
     if meta.cover.as_ref().is_some_and(|c| deleted.contains(c)) {
         meta.cover = meta.pages.first().cloned();
