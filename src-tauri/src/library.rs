@@ -893,13 +893,16 @@ pub fn resync_manga_from_disk(root: &Path, item: &mut Item) -> bool {
 }
 
 /// 判断扩展名是否为图片
-pub fn is_image_file(path: &Path) -> bool {    path.extension()
+pub fn is_image_file(path: &Path) -> bool {
+    path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| IMAGE_EXTENSIONS.contains(&e.to_lowercase().as_str()))
-        .unwrap_or(false)
+        .is_some_and(|e| IMAGE_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
-/// 自然排序比较（page2 < page10）
+/// 自然排序比较（page2 < page10）。
+///
+/// 这是最热的比较函数（导入扫盘 / 体检对每个文件名排序），数字段与
+/// ASCII 字符都走零分配路径；只有非 ASCII 字符才退回 Unicode 小写展开。
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     let mut ai = a.chars().peekable();
     let mut bi = b.chars().peekable();
@@ -910,34 +913,41 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
             (Some(_), None) => return Ordering::Greater,
             (Some(ca), Some(cb)) => {
                 if ca.is_ascii_digit() && cb.is_ascii_digit() {
-                    let mut na = String::new();
+                    // 边扫边累加数值；超长数字串饱和后视为相等
+                    // （原先 parse 失败置 0，同为「视作相等」的兜底）
+                    let mut va: u64 = 0;
                     while let Some(&c) = ai.peek() {
-                        if c.is_ascii_digit() {
-                            na.push(c);
-                            ai.next();
-                        } else {
-                            break;
+                        match c.to_digit(10) {
+                            Some(d) => {
+                                va = va.saturating_mul(10).saturating_add(u64::from(d));
+                                ai.next();
+                            }
+                            None => break,
                         }
                     }
-                    let mut nb = String::new();
+                    let mut vb: u64 = 0;
                     while let Some(&c) = bi.peek() {
-                        if c.is_ascii_digit() {
-                            nb.push(c);
-                            bi.next();
-                        } else {
-                            break;
+                        match c.to_digit(10) {
+                            Some(d) => {
+                                vb = vb.saturating_mul(10).saturating_add(u64::from(d));
+                                bi.next();
+                            }
+                            None => break,
                         }
                     }
-                    let va: u64 = na.parse().unwrap_or(0);
-                    let vb: u64 = nb.parse().unwrap_or(0);
                     match va.cmp(&vb) {
                         Ordering::Equal => continue,
                         other => return other,
                     }
                 } else {
-                    let la = ca.to_lowercase().to_string();
-                    let lb = cb.to_lowercase().to_string();
-                    match la.cmp(&lb) {
+                    let ord = if ca.is_ascii() && cb.is_ascii() {
+                        ca.to_ascii_lowercase().cmp(&cb.to_ascii_lowercase())
+                    } else {
+                        let la = ca.to_lowercase().to_string();
+                        let lb = cb.to_lowercase().to_string();
+                        la.cmp(&lb)
+                    };
+                    match ord {
                         Ordering::Equal => {
                             ai.next();
                             bi.next();
