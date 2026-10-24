@@ -39,7 +39,15 @@ pub struct AppState {
     pub root: PathBuf,
     pub index_path: PathBuf,
     pub index: LibraryIndex,
+    /// 高频小改动（阅读进度）只改内存并标脏，由后台线程定期落盘；
+    /// 任何走 save() 的写操作都会顺带冲掉该标记
+    pending_flush: bool,
+    /// 上次索引落盘时间，save_progress 据此做写盘节流
+    last_write: Option<Instant>,
 }
+
+/// 阅读进度写盘的最小间隔：窗口内只改内存标脏，由后台线程凑满窗口再落盘
+const PROGRESS_WRITE_MIN_INTERVAL: Duration = Duration::from_secs(2);
 
 impl AppState {
     pub fn new(root: PathBuf) -> Result<Self, String> {
@@ -51,11 +59,18 @@ impl AppState {
             root,
             index_path,
             index,
+            pending_flush: false,
+            last_write: None,
         })
     }
 
-    fn save(&self) -> Result<(), String> {
-        self.index.save(&self.index_path)
+    fn save(&mut self) -> Result<(), String> {
+        let result = self.index.save(&self.index_path);
+        if result.is_ok() {
+            self.pending_flush = false;
+            self.last_write = Some(Instant::now());
+        }
+        result
     }
 }
 
@@ -405,6 +420,12 @@ pub fn library_health_clean(
 }
 
 /// 保存阅读进度（0.0 - 1.0）
+///
+/// 阅读时前端约每 400ms 报一次进度，每次都全量序列化整个索引落盘
+/// （书库大了 index.json 有数 MB）对闪存不友好：距上次落盘不足
+/// [`PROGRESS_WRITE_MIN_INTERVAL`] 时只改内存并标脏，由后台线程定期
+/// 冲刷（[`flush_pending_writes`]）。代价是进程被杀时最多丢最后约
+/// 2 秒的进度（原先为 400ms），对阅读位置无感。
 #[tauri::command]
 pub fn save_progress(
     state: State<'_, Mutex<AppState>>,
@@ -419,7 +440,35 @@ pub fn save_progress(
     if let Some(meta) = item.manga.as_mut() {
         meta.progress = progress.clamp(0.0, 1.0);
     }
+    if st
+        .last_write
+        .is_some_and(|t| t.elapsed() < PROGRESS_WRITE_MIN_INTERVAL)
+    {
+        st.pending_flush = true;
+        return Ok(());
+    }
     st.save()
+}
+
+/// 冲刷延迟落盘的阅读进度：lib.rs 的后台线程每秒调用一次。
+/// 与 save_progress 用同一个节流窗口——凑满 2 秒、且有脏数据才真正写盘。
+pub fn flush_pending_writes(state: &State<'_, Mutex<AppState>>) {
+    let mut st = match lock(state) {
+        Ok(st) => st,
+        Err(_) => return,
+    };
+    if !st.pending_flush {
+        return;
+    }
+    if st
+        .last_write
+        .is_some_and(|t| t.elapsed() < PROGRESS_WRITE_MIN_INTERVAL)
+    {
+        return;
+    }
+    if let Err(e) = st.save() {
+        eprintln!("落盘延迟的阅读进度失败: {e}");
+    }
 }
 
 /// 取一部漫画全部图片的绝对路径（前端经 asset 协议加载）
