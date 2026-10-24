@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useBackHandler } from "../../backHandler";
+import { CheckIcon } from "./icons";
 
 export interface MenuAction {
   label: string;
   onSelect: () => void;
   danger?: boolean;
   separatorBefore?: boolean;
+  /** 勾选位（风格切换这类单选项用）；undefined = 不显示勾选位 */
+  checked?: boolean;
 }
 
 interface Props {
@@ -40,12 +43,16 @@ export default function ContextMenu({ x, y, actions, onClose }: Props) {
     window.addEventListener("keydown", onKey);
     window.addEventListener("resize", close);
     window.addEventListener("scroll", close, true);
+    // 打开另一个菜单前主动广播：打开方会拦下自己的 click 冒泡，
+    // 已开着的菜单听不到 click，靠这个事件收起
+    window.addEventListener("conceit:close-menus", close);
     return () => {
       window.removeEventListener("click", close);
       window.removeEventListener("contextmenu", close);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", close);
       window.removeEventListener("scroll", close, true);
+      window.removeEventListener("conceit:close-menus", close);
     };
   }, [onClose]);
 
@@ -78,7 +85,12 @@ export default function ContextMenu({ x, y, actions, onClose }: Props) {
               onClose();
             }}
           >
-            {a.label}
+            {a.checked !== undefined && (
+              <span className="ctx-check" aria-hidden="true">
+                {a.checked ? <CheckIcon /> : null}
+              </span>
+            )}
+            <span className="ctx-item-label">{a.label}</span>
           </button>
         </div>
       ))}

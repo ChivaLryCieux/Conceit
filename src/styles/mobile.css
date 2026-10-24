@@ -123,7 +123,7 @@
     padding: 10px 12px calc(10px + var(--nav-bar-h));
   }
 
-  /* 底部功能栏两行：第一行 品牌 + 面包屑（可横向滚动），第二行 操作按钮（贴底） */
+  /* 底部功能栏单行排布：品牌 + 面包屑（可横向滚动）+ 新建 / 设置两个图标按钮 */
   .shelf-brand {
     flex: 0 0 auto;
   }
@@ -132,27 +132,16 @@
     font-size: 15px;
   }
 
-  /* 窄屏隐藏 "Conceit" 角标，把宽度让给面包屑 */
-  .brand-sub {
-    display: none;
-  }
-
   .crumbs {
     flex: 1;
     min-width: 0;
     padding-bottom: 2px;
   }
 
-  .shelf-actions {
-    flex-basis: 100%;
-  }
-
+  /* 触控目标加大到 44px */
   .shelf-actions .btn {
-    flex: 1;
-    min-width: 0;
-    text-align: center;
-    padding: 11px 6px;
-    font-size: 13px;
+    width: 44px;
+    height: 44px;
   }
 
   .shelf-grid {
@@ -288,11 +277,6 @@
 /* ---------- 小屏手机（≤380px） ---------- */
 
 @media (max-width: 380px) {
-  .shelf-actions .btn {
-    font-size: 12px;
-    padding: 10px 4px;
-  }
-
   .shelf-grid {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 12px 8px;

@@ -94,3 +94,22 @@ export function PlusIcon({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/** 菜单项的选中勾（风格切换这类单选项用） */
+export function CheckIcon({ size = 13 }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4.5 12.5l5 5L19.5 7" />
+    </svg>
+  );
+}
