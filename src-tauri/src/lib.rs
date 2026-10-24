@@ -61,7 +61,6 @@ pub fn run() {
             commands::adopt_manga_dir,
             commands::rescan_manga_pages,
             commands::manga_pages,
-            commands::suggest_title,
             commands::import_sources,
             commands::update_item_settings,
             commands::add_manga_pages,

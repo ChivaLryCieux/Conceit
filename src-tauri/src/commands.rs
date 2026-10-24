@@ -96,6 +96,22 @@ fn lock<'a>(
         .or_else(|poisoned| Ok(poisoned.into_inner()))
 }
 
+/// 体检清理与收编孤儿目录共用的 id 白名单校验：id 会直接拼进磁盘路径，
+/// 只放行字母数字与 `-` / `_`，挡住目录穿越与奇怪字符
+fn sanitize_id(raw: &str) -> Result<&str, String> {
+    let id = raw.trim();
+    if id.is_empty()
+        || id.contains(['/', '\\'])
+        || id.split('/').any(|c| c == "..")
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("非法条目 id: {raw}"));
+    }
+    Ok(id)
+}
+
 /// 导入中途失败时清掉半成品目录：解压 / 复制到一半（常见于空间不足）后
 /// 若直接返回错误，垃圾目录会留在书库里白占空间。
 fn cleanup_partial_import(dest: &Path) {
@@ -312,16 +328,7 @@ pub fn adopt_manga_dir(
     parent: Option<String>,
 ) -> Result<Item, String> {
     // id 直接参与拼路径，白名单与体检清理一致
-    let id = id.trim();
-    if id.is_empty()
-        || id.contains(['/', '\\'])
-        || id.split('/').any(|c| c == "..")
-        || !id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return Err(format!("非法目录 id: {}", id));
-    }
+    let id = sanitize_id(&id)?;
     let title = title.trim();
     if title.is_empty() {
         return Err("漫画名称不能为空".to_string());
@@ -380,16 +387,7 @@ pub fn library_health_clean(
     let mut cleaned = 0usize;
     for target in &targets {
         // id 直接参与拼路径，挡住穿越与奇怪字符
-        let id = target.id.trim();
-        if id.is_empty()
-            || id.contains(['/', '\\'])
-            || id.split('/').any(|c| c == "..")
-            || !id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            return Err(format!("非法条目 id: {}", target.id));
-        }
+        let id = sanitize_id(&target.id)?;
         let dir = st.root.join(MANGA_DIR_NAME).join(id);
         // 体检只针对漫画条目：文件夹不会被报出来，这里也一并挡掉
         let in_index = st
@@ -499,12 +497,6 @@ pub fn app_platform() -> &'static str {
     } else {
         "desktop"
     }
-}
-
-/// 由路径推断标题（供导入时使用，前端可直接用）
-#[tauri::command]
-pub fn suggest_title(path: String) -> Result<String, String> {
-    Ok(title_from_path(&PathBuf::from(path)))
 }
 
 /// 更新条目设置：名称 / 是否展示封面 / 选择某一页作为封面

@@ -752,12 +752,12 @@ pub fn build_health_report(root: &Path, index: &LibraryIndex) -> HealthReport {
         .iter()
         .filter(|i| i.kind == ItemKind::Manga)
         .collect();
-    // 磁盘实况补上索引里的标题，孤儿目录保持 None
+    // 磁盘实况补上索引里的标题，孤儿目录保持 None；
+    // 目录名 -> 条目先建索引，避免每个目录都全量扫一遍漫画条目
+    let item_by_dir: HashMap<String, &Item> =
+        mangas.iter().map(|m| (manga_dir_name(m), *m)).collect();
     for stat in &mut disk_stats {
-        stat.title = mangas
-            .iter()
-            .find(|m| manga_dir_name(m) == stat.id)
-            .map(|m| m.title.clone());
+        stat.title = item_by_dir.get(&stat.id).map(|m| m.title.clone());
     }
     let stat_by_id: HashMap<&str, &DirStat> =
         disk_stats.iter().map(|s| (s.id.as_str(), s)).collect();
