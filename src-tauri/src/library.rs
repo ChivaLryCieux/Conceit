@@ -114,7 +114,23 @@ impl LibraryIndex {
         if text.trim().is_empty() {
             return Ok(LibraryIndex::default());
         }
-        serde_json::from_str(&text).map_err(|e| format!("解析索引文件失败: {e}"))
+        match serde_json::from_str(&text) {
+            Ok(index) => Ok(index),
+            Err(e) => {
+                // 半截 JSON 不该让应用永远起不来：备份坏文件、降级为空索引
+                // 启动。漫画文件都还在 manga/ 下，之后用书库体检的
+                // 「孤儿目录收进书架」能逐部捞回，比卡在启动页好得多。
+                // （save 已改为原子写入，正常情况下不会再产生半截文件，
+                // 这里兜底磁盘损坏与更早版本写出的残留。）
+                let backup = path.with_extension("corrupt.json");
+                eprintln!(
+                    "索引文件解析失败（已备份为 {}，降级为空索引启动）: {e}",
+                    backup.display()
+                );
+                let _ = fs::rename(path, &backup);
+                Ok(LibraryIndex::default())
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -123,7 +139,16 @@ impl LibraryIndex {
                 .map_err(|e| format!("创建索引目录失败 {}: {e}", parent.display()))?;
         }
         let text = serde_json::to_string_pretty(self).map_err(|e| format!("序列化索引失败: {e}"))?;
-        fs::write(path, text).map_err(|e| format!("写入索引文件失败: {e}"))
+        // 先写同目录临时文件再 rename：直接覆盖原文件时，进程若在写入中途
+        // 被杀（安卓上 lmkd 随时可能）会留下半截 JSON，下次启动解析失败。
+        // 同卷 rename 在 Windows / Unix 上都是原子替换，读者要么看到完整
+        // 旧文件、要么看到完整新文件，不存在中间态。
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, &text).map_err(|e| format!("写入索引文件失败 {}: {e}", tmp.display()))?;
+        fs::rename(&tmp, path).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("写入索引文件失败 {}: {e}", path.display())
+        })
     }
 
     /// 分配一个新 id（m1 / f2 形式）
@@ -1465,6 +1490,38 @@ mod tests {
         // 空文件 / 不存在都应得到默认索引
         fs::write(&path, "").unwrap();
         assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 0);
+
+        // 再次保存会原子替换旧文件，加载到的是新内容
+        idx.items.push(manga("m2", None));
+        idx.attach("m2", None);
+        idx.save(&path).unwrap();
+        assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 2);
+
+        // 保存后不残留临时文件
+        assert!(!dir.join("index.json.tmp").exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_recovers_from_corrupt_index_file() {
+        let dir = temp_dir("index-corrupt");
+        let path = dir.join("index.json");
+        fs::write(&path, "{ 这不是合法 json").unwrap();
+
+        // 半截 / 损坏的索引：备份坏文件后降级为空索引，而不是让应用起不来
+        let idx = LibraryIndex::load(&path).unwrap();
+        assert!(idx.items.is_empty());
+        assert!(!path.exists());
+        let backup = dir.join("index.corrupt.json");
+        assert!(backup.exists());
+
+        // 降级后可以正常继续保存 / 加载
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga("m1", None));
+        idx.attach("m1", None);
+        idx.save(&path).unwrap();
+        assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 1);
+
         fs::remove_dir_all(&dir).ok();
     }
 
