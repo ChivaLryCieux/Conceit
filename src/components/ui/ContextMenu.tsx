@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useBackHandler } from "../../backHandler";
 import { CheckIcon } from "./icons";
 
@@ -66,7 +67,9 @@ export default function ContextMenu({ x, y, actions, onClose }: Props) {
     });
   }, [x, y]);
 
-  return (
+  /* Portal 到 body：玻璃胶囊（backdrop-filter）会成为 fixed 后代的包含块，
+     留在 header 里菜单的坐标会变成相对胶囊、被推出屏幕外 */
+  return createPortal(
     <div
       ref={ref}
       className="ctx-menu"
@@ -94,6 +97,7 @@ export default function ContextMenu({ x, y, actions, onClose }: Props) {
           </button>
         </div>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }

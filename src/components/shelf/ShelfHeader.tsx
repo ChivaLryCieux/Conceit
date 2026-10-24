@@ -21,7 +21,8 @@ interface Props {
   onCrumbDrop: (e: DragEvent, folderId: string | null) => void;
 }
 
-/** 底部功能栏：左下角品牌（纯文本，不带框）、面包屑导航、右下角两个按钮——
+/** 底部功能栏：悬浮玻璃胶囊（覆盖在网格上方，封面从它下面滑过）。
+ *  左下角品牌（纯文本，不带框）、面包屑导航、右下角两个按钮——
  *  新建（右起第二个）与设置（最右）。两个按钮都在自己上方弹出菜单：
  *  新建 = 新建漫画 / 新建文件夹 / 导入 zip / 导入文件夹；
  *  设置 = 书库体检 / 界面风格（白色 / 黑色）。 */
@@ -89,7 +90,7 @@ export default function ShelfHeader({
   ];
 
   return (
-    <header className="shelf-header">
+    <header className="shelf-header glass">
       <div className="shelf-brand">
         <span className="brand-name">Conceit 幻想阅读器</span>
       </div>

@@ -2,22 +2,31 @@
 /* ---------- 书架 ---------- */
 
 .shelf {
+  /* 悬浮胶囊的定位基准 */
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
 }
 
-/* 功能栏固定底部：平板 / 手机上拇指更好够到；顶部不再为状态栏留白，
-   网格直接顶到屏幕边缘（与改动前「轻微重合」的观感一致） */
+/* 底部功能栏：悬浮玻璃胶囊，覆盖在网格上方，封面从它下面滑过——
+   玻璃后面有内容移动，磨砂才有意义（贴边的实底条做不到）。
+   网格靠 padding-bottom 让出胶囊的高度（见 .shelf-grid） */
 .shelf-header {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(10px + var(--nav-bar-h));
+  z-index: 20;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 10px 22px calc(10px + var(--nav-bar-h));
-  border-top: 1px solid var(--border);
-  background: var(--bg-soft);
-  flex-wrap: wrap;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  /* 胶囊永远单行：面包屑自己横向滚动，不换行挤成两楼 */
+  flex-wrap: nowrap;
   flex-shrink: 0;
 }
 
@@ -84,7 +93,8 @@
   color: var(--text-faint);
 }
 
-/* 右下角两个图标按钮：新建（右起第二个）与设置（最右），点击在按钮上方弹菜单 */
+/* 右下角两个图标按钮：新建（右起第二个）与设置（最右），点击在按钮上方弹菜单。
+   玻璃上的按钮用半透明填充，不用实底色块压住磨砂 */
 .shelf-actions {
   display: flex;
   gap: 8px;
@@ -97,6 +107,13 @@
   width: 38px;
   height: 38px;
   padding: 0;
+  background: var(--glass-fill);
+  border-color: transparent;
+}
+
+.shelf-actions .btn:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
 }
 
 .shelf-grid {
@@ -106,7 +123,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 20px 16px;
-  padding: 22px;
+  /* 底部让出悬浮胶囊的高度（胶囊约 60px + 悬浮间距 10px + 呼吸空间） */
+  padding: 22px 22px calc(88px + var(--nav-bar-h));
   align-content: start;
 }
 
@@ -118,7 +136,8 @@
   gap: 10px;
   color: var(--text-dim);
   text-align: center;
-  padding: 24px;
+  /* 底部同样让出胶囊，居中内容不会被它压住 */
+  padding: 24px 24px calc(96px + var(--nav-bar-h));
 }
 
 .shelf-empty p {

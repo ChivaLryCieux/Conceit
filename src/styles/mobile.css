@@ -29,6 +29,11 @@
     background: var(--bg-raised-hover);
   }
 
+  /* 玻璃胶囊上的按钮：按压反馈用半透明强调色，不用实底色块压住磨砂 */
+  .shelf-actions .btn:active {
+    background: var(--accent-soft);
+  }
+
   .btn-primary:active {
     background: var(--accent-hover);
   }
@@ -105,13 +110,14 @@
 @media (max-width: 1024px) {
   .shelf-header {
     gap: 12px;
-    padding-left: 16px;
-    padding-right: 16px;
+    left: 10px;
+    right: 10px;
+    padding: 10px 12px;
   }
 
   .shelf-grid {
     gap: 16px 12px;
-    padding: 16px;
+    padding: 16px 16px calc(86px + var(--nav-bar-h));
   }
 }
 
@@ -120,7 +126,10 @@
 @media (max-width: 640px) {
   .shelf-header {
     gap: 10px;
-    padding: 10px 12px calc(10px + var(--nav-bar-h));
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + var(--nav-bar-h));
+    padding: 8px 10px;
   }
 
   /* 底部功能栏单行排布：品牌 + 面包屑（可横向滚动）+ 新建 / 设置两个图标按钮 */
@@ -147,7 +156,7 @@
   .shelf-grid {
     grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
     gap: 14px 10px;
-    padding: 12px;
+    padding: 12px 12px calc(84px + var(--nav-bar-h));
   }
 
   .card-cover-initial {
@@ -280,7 +289,7 @@
   .shelf-grid {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 12px 8px;
-    padding: 10px;
+    padding: 10px 10px calc(84px + var(--nav-bar-h));
   }
 
   .reader-bottombar {
