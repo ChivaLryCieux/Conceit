@@ -269,8 +269,8 @@ pub fn rescan_manga_pages(
     state: State<'_, Mutex<AppState>>,
     id: String,
 ) -> Result<Item, String> {
-    let root = lock(&state)?.root.clone();
     let mut st = lock(&state)?;
+    let root = st.root.clone();
     let item = st
         .index
         .item_mut(&id)
@@ -315,8 +315,8 @@ pub fn adopt_manga_dir(
     let parent = parent
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
-    let root = lock(&state)?.root.clone();
     let mut st = lock(&state)?;
+    let root = st.root.clone();
     let item = st
         .index
         .adopt_manga_dir(&root, id, title, parent.as_deref())?;
@@ -467,9 +467,9 @@ pub fn update_item_settings(
     show_cover: Option<bool>,
     cover: Option<String>,
 ) -> Result<(), String> {
-    // 先取出根目录，避免与下面的可变借用冲突
-    let root = lock(&state)?.root.clone();
     let mut st = lock(&state)?;
+    // root 先克隆出来：之后 item_mut 可变借用的是 index 字段，与 root 无冲突
+    let root = st.root.clone();
     let item = st
         .index
         .item_mut(&id)
@@ -726,8 +726,8 @@ pub fn add_manga_pages(
     id: String,
     paths: Vec<String>,
 ) -> Result<Item, String> {
-    let root = lock(&state)?.root.clone();
     let mut st = lock(&state)?;
+    let root = st.root.clone();
     match st.index.item(&id) {
         Some(item) if item.manga.is_some() => {}
         Some(_) => return Err("该条目不是漫画".to_string()),
@@ -773,8 +773,8 @@ pub fn delete_manga_pages(
     id: String,
     pages: Vec<String>,
 ) -> Result<Item, String> {
-    let root = lock(&state)?.root.clone();
     let mut st = lock(&state)?;
+    let root = st.root.clone();
     let item = st
         .index
         .item_mut(&id)
@@ -795,9 +795,8 @@ pub fn delete_manga_pages(
     if meta.pages.len() <= pages.len() {
         return Err("至少需要保留一页图片".to_string());
     }
+    delete_manga_files(&root, &id, &pages);
     let deleted: HashSet<String> = pages.into_iter().collect();
-    let deleted_list: Vec<String> = deleted.iter().cloned().collect();
-    delete_manga_files(&root, &id, &deleted_list);
     meta.pages.retain(|p| !deleted.contains(p));
     // 封面页被删 → 顺延到当前第一页，缩略图跟着重建
     if meta.cover.as_ref().is_some_and(|c| deleted.contains(c)) {
