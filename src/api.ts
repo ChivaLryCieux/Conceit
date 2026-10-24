@@ -4,7 +4,6 @@ import { invoke, type Channel } from "@tauri-apps/api/core";
 import type {
   HealthReport,
   Item,
-  LibraryIndex,
   LibrarySnapshot,
 } from "./types";
 import { ROOT_KEY } from "./types";
@@ -208,31 +207,22 @@ export async function reorderMangaPages(id: string, pages: string[]): Promise<It
   return invoke<Item>("reorder_manga_pages", { id, pages });
 }
 
-/** 某个容器（root 或文件夹）下按排序排列的条目 */
+/** 某个容器（root 或文件夹）下按排序排列的条目。
+ *  顺序与兜底规则由 Rust LibraryIndex::children 单一来源计算，随快照
+ *  下发（snapshot.children）；这里只做 id -> 条目的查表。 */
 export function childrenOf(
-  index: LibraryIndex,
+  snapshot: LibrarySnapshot,
   parent: string | null
 ): Item[] {
   const key = parent ?? ROOT_KEY;
-  const ordered = index.order[key] ?? [];
-  const byId = new Map(index.items.map((it) => [it.id, it]));
+  const byId = new Map(snapshot.index.items.map((it) => [it.id, it]));
   const result: Item[] = [];
   const seen = new Set<string>();
-  for (const id of ordered) {
+  for (const id of snapshot.children[key] ?? []) {
     const item = byId.get(id);
-    if (item && item.parent === (parent ?? undefined) && !seen.has(id)) {
+    if (item && !seen.has(id)) {
       result.push(item);
       seen.add(id);
-    }
-  }
-  // 兜底：补齐未排序的新条目
-  for (const item of index.items) {
-    if (
-      (item.parent ?? undefined) === (parent ?? undefined) &&
-      !seen.has(item.id)
-    ) {
-      result.push(item);
-      seen.add(item.id);
     }
   }
   return result;

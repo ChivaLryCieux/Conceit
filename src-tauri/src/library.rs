@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 pub const INDEX_VERSION: u32 = 1;
 pub const INDEX_FILE_NAME: &str = "index.json";
 pub const MANGA_DIR_NAME: &str = "manga";
+/// 根容器的排序键（前端 types.ts 的 ROOT_KEY 与之一致）
+pub const ROOT_KEY: &str = "root";
 /// 封面缩略图目录（相对书库根目录）
 pub const THUMB_DIR_NAME: &str = "thumbs";
 /// 缩略图长边上限（像素）；原图任一边超过它才生成缩略图
@@ -107,7 +109,7 @@ impl Default for LibraryIndex {
 impl LibraryIndex {
     /// 容器键：None -> "root"
     pub fn container_key(parent: Option<&str>) -> String {
-        parent.unwrap_or("root").to_string()
+        parent.unwrap_or(ROOT_KEY).to_string()
     }
 
     pub fn load(path: &Path) -> Result<Self, String> {

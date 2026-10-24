@@ -56,8 +56,8 @@ export default function Shelf({
 
   // 书架条目只在快照或所在目录变化时重算（排序过程中会频繁触发重渲染）
   const items = useMemo(
-    () => childrenOf(snapshot.index, currentFolder),
-    [snapshot.index, currentFolder]
+    () => childrenOf(snapshot, currentFolder),
+    [snapshot, currentFolder]
   );
 
   const {

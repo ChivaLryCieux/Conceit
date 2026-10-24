@@ -46,6 +46,9 @@ export interface LibrarySnapshot {
   index: LibraryIndex;
   /** 文件夹 id -> 其中（含子文件夹）的漫画数量，由 Rust 预计算 */
   manga_counts: Record<string, number>;
+  /** 容器键（"root" 或文件夹 id）-> 按 Rust LibraryIndex::children 算好的
+   *  有序子条目 id；排序与兜底规则只在后端一份，前端查表即可 */
+  children: Record<string, string[]>;
 }
 
 /* ---------- 书库体检 ---------- */

@@ -82,6 +82,10 @@ pub struct Snapshot {
     pub index: LibraryIndex,
     /// 文件夹 id -> 其中（含子文件夹）的漫画数量，前端直接查表
     pub manga_counts: BTreeMap<String, u32>,
+    /// 容器键（ROOT_KEY 或文件夹 id）-> 按 [`LibraryIndex::children`] 算好的
+    /// 有序子条目 id。排序与兜底规则只在数据层这一份，前端 childrenOf
+    /// 直接查表，不再把同一套规则用 TS 重写一遍
+    pub children: BTreeMap<String, Vec<String>>,
 }
 
 /// 取书库状态锁。锁中毒（某线程持锁时 panic 过）时恢复守卫而不是报错：
@@ -129,10 +133,33 @@ fn cleanup_partial_import(dest: &Path) {
 #[tauri::command]
 pub fn library_snapshot(state: State<'_, Mutex<AppState>>) -> Result<Snapshot, String> {
     let st = lock(&state)?;
+    // 每个容器（root + 每个文件夹）的有序子条目，一次算好随快照下发
+    let mut children = BTreeMap::new();
+    children.insert(
+        crate::library::ROOT_KEY.to_string(),
+        st.index
+            .children(None)
+            .iter()
+            .map(|i| i.id.clone())
+            .collect(),
+    );
+    for item in &st.index.items {
+        if item.kind == ItemKind::Folder {
+            children.insert(
+                item.id.clone(),
+                st.index
+                    .children(Some(&item.id))
+                    .iter()
+                    .map(|i| i.id.clone())
+                    .collect(),
+            );
+        }
+    }
     Ok(Snapshot {
         root: st.root.to_string_lossy().replace('\\', "/"),
         index: st.index.clone(),
         manga_counts: st.index.manga_counts(),
+        children,
     })
 }
 
