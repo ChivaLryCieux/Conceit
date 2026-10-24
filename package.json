@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Conceit（幻想阅读器）— 一个简洁的本地漫画阅读器（Tauri 2 + React）",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "vite",
     "build": "tsc --noEmit && oxlint && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
@@ -23,9 +23,9 @@
     "@tauri-apps/cli": "^2.4.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "1.89.0",
     "typescript": "~5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^8.3.5"
   }
 }
