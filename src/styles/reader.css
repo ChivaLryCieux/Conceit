@@ -8,27 +8,27 @@
   z-index: 60;
 }
 
-/* 底栏而非顶栏：顶部与手机状态栏相邻，容易误触 */
+/* 底部悬浮玻璃胶囊（与书架功能栏同款材质）：覆盖在漫画上，翻页时
+   页面从胶囊下面穿过。底栏而非顶栏：顶部与手机状态栏相邻，容易误触 */
 .reader-bottombar {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  left: 12px;
+  right: 12px;
+  bottom: calc(10px + var(--nav-bar-h));
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 16px calc(10px + var(--nav-bar-h));
-  background: var(--reader-chrome);
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
+  padding: 10px 14px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
   z-index: 2;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.24s var(--ease-spring), transform 0.24s var(--ease-spring);
 }
 
 .reader-bottombar.chrome-hidden {
   opacity: 0;
-  transform: translateY(100%);
+  transform: translateY(calc(100% + 16px));
   pointer-events: none;
 }
 
@@ -50,18 +50,13 @@
 
 .reader-zoom-value {
   min-width: 52px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
   color: var(--text);
   font-size: 12px;
   padding: 6px 8px;
   cursor: pointer;
   font-variant-numeric: tabular-nums;
-}
-
-.reader-zoom-value:hover {
-  border-color: var(--accent);
 }
 
 .btn-icon {
@@ -73,6 +68,19 @@
 .btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* 玻璃底栏上的控件：半透明填充，不用实底色块压住磨砂 */
+.reader-bottombar .btn,
+.reader-bottombar .reader-zoom-value {
+  background: var(--glass-fill);
+  border-color: transparent;
+}
+
+.reader-bottombar .btn:hover,
+.reader-bottombar .reader-zoom-value:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
 }
 
 .reader-slider {
@@ -155,12 +163,11 @@
   left: 50%;
   top: calc(18px + var(--status-bar-h));
   transform: translateX(-50%);
-  background: var(--reader-chrome);
-  border: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 12px;
   padding: 7px 14px;
   border-radius: 999px;
+  box-shadow: var(--shadow-2);
   z-index: 3;
   transition: opacity 0.2s ease;
   pointer-events: none;

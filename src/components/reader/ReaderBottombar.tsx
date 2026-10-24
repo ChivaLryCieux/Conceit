@@ -40,7 +40,7 @@ export default function ReaderBottombar({
 }: Props) {
   return (
     <div
-      className={`reader-bottombar${chromeVisible ? "" : " chrome-hidden"}`}
+      className={`reader-bottombar glass${chromeVisible ? "" : " chrome-hidden"}`}
       onClick={(e) => e.stopPropagation()}
     >
       <button type="button" className="btn" onClick={onExit}>

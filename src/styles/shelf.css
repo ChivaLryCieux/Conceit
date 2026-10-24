@@ -320,16 +320,17 @@
 
 /* ---------- 右键菜单 ---------- */
 
+/* ---------- 右键 / 弹出菜单（磨砂玻璃，经 portal 挂到 body） ---------- */
+
 .ctx-menu {
   position: fixed;
   min-width: 168px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   padding: 6px;
   z-index: 120;
   box-shadow: var(--shadow-2);
-  animation: pop-in 0.12s ease-out;
+  /* 从锚点方向缩放进场；transform-origin 由组件按弹出的方位设置 */
+  animation: menu-in 0.18s var(--ease-spring);
 }
 
 .ctx-item {
@@ -342,7 +343,7 @@
   border: none;
   color: var(--text);
   padding: 8px 10px;
-  border-radius: 7px;
+  border-radius: 8px;
   font-size: 13px;
   cursor: pointer;
 }

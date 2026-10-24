@@ -68,12 +68,16 @@ export default function ContextMenu({ x, y, actions, onClose }: Props) {
   }, [x, y]);
 
   /* Portal 到 body：玻璃胶囊（backdrop-filter）会成为 fixed 后代的包含块，
-     留在 header 里菜单的坐标会变成相对胶囊、被推出屏幕外 */
+     留在 header 里菜单的坐标会变成相对胶囊、被推出屏幕外。
+     transformOrigin 按锚点方位设置，让菜单从触发处缩放弹出 */
+  const originY = y > window.innerHeight / 2 ? "bottom" : "top";
+  const originX = x > window.innerWidth / 2 ? "right" : "left";
+
   return createPortal(
     <div
       ref={ref}
-      className="ctx-menu"
-      style={{ left: pos.left, top: pos.top }}
+      className="ctx-menu glass"
+      style={{ left: pos.left, top: pos.top, transformOrigin: `${originY} ${originX}` }}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >

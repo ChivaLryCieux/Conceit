@@ -30,7 +30,8 @@
   }
 
   /* 玻璃胶囊上的按钮：按压反馈用半透明强调色，不用实底色块压住磨砂 */
-  .shelf-actions .btn:active {
+  .shelf-actions .btn:active,
+  .reader-bottombar .btn:active {
     background: var(--accent-soft);
   }
 
@@ -185,7 +186,10 @@
   /* 阅读器底栏：第一行 退出 + 标题 + 缩放，第二行 进度 + 计数 */
   .reader-bottombar {
     gap: 8px;
-    padding: 8px 10px calc(8px + var(--nav-bar-h));
+    left: 10px;
+    right: 10px;
+    bottom: calc(8px + var(--nav-bar-h));
+    padding: 8px 10px;
   }
 
   .reader-bottombar .btn {
@@ -238,9 +242,10 @@
     width: 100%;
     max-width: 100%;
     max-height: 90vh;
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
     border-bottom: none;
     padding-bottom: var(--nav-bar-h);
+    animation: sheet-in 0.26s var(--ease-spring);
   }
 
   .modal-header {

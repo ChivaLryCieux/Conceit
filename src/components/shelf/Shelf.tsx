@@ -264,23 +264,25 @@ export default function Shelf({
 
       {busy && (
         <div className="busy-mask">
-          <div className="spinner" />
-          <div>{busy}</div>
-          {progress && (
-            <div className="busy-progress" aria-label="导入进度">
-              <div
-                className={`busy-progress-bar${
-                  progress.ratio === null ? " busy-progress-bar--indeterminate" : ""
-                }`}
-                style={
-                  progress.ratio === null
-                    ? undefined
-                    : { width: `${Math.round(progress.ratio * 100)}%` }
-                }
-              />
-            </div>
-          )}
-          {progress && <div className="busy-progress-text">{progress.label}</div>}
+          <div className="busy-card glass">
+            <div className="spinner" />
+            <div>{busy}</div>
+            {progress && (
+              <div className="busy-progress" aria-label="导入进度">
+                <div
+                  className={`busy-progress-bar${
+                    progress.ratio === null ? " busy-progress-bar--indeterminate" : ""
+                  }`}
+                  style={
+                    progress.ratio === null
+                      ? undefined
+                      : { width: `${Math.round(progress.ratio * 100)}%` }
+                  }
+                />
+              </div>
+            )}
+            {progress && <div className="busy-progress-text">{progress.label}</div>}
+          </div>
         </div>
       )}
     </div>

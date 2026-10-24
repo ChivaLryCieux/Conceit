@@ -8,11 +8,28 @@
   display: grid;
   place-items: center;
   align-content: center;
-  gap: 14px;
   z-index: 90;
+  backdrop-filter: blur(6px);
+}
+
+/* 忙碌内容收进玻璃卡片：转圈 + 文案 + 进度条 */
+.busy-card {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  min-width: min(280px, 72vw);
+  max-width: 86vw;
+  padding: 22px 34px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
   color: var(--text);
   font-size: 14px;
-  backdrop-filter: blur(2px);
+  animation: pop-in 0.18s var(--ease-spring);
+}
+
+.busy-card .busy-progress-text {
+  max-width: 100%;
 }
 
 .spinner {
@@ -65,7 +82,8 @@
 
 .toast-stack {
   position: fixed;
-  bottom: calc(20px + var(--nav-bar-h));
+  /* 抬到悬浮胶囊上方，避免遮挡 */
+  bottom: calc(88px + var(--nav-bar-h));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -76,13 +94,11 @@
 }
 
 .toast {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
   padding: 10px 16px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   font-size: 13px;
   box-shadow: var(--shadow-2);
-  animation: toast-in 0.18s ease-out;
+  animation: toast-in 0.22s var(--ease-spring);
   max-width: 70vw;
 }
 
@@ -117,12 +133,12 @@
   position: fixed;
   inset: 0;
   background: var(--scrim);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(8px);
   display: grid;
   place-items: center;
   z-index: 160;
   padding: 20px;
-  animation: fade-in 0.14s ease-out;
+  animation: fade-in 0.16s ease-out;
 }
 
 .modal {
@@ -132,9 +148,9 @@
   flex-direction: column;
   background: var(--bg-soft);
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-3);
-  animation: pop-in 0.14s ease-out;
+  animation: modal-in 0.22s var(--ease-spring);
 }
 
 .modal-wide {

@@ -36,7 +36,6 @@
   --scrollbar-thumb-hover: #aeb1bd;
   /* 阅读器（漫画背景通常偏白，白风格用浅灰衬托页与页的边界） */
   --reader-bg: #e9e9ee;
-  --reader-chrome: rgba(255, 255, 255, 0.95);
   --reader-page-bg: #dcdce3;
 
   /* 阴影三档：双层柔和低透明度（贴地 + 漫射），代替单层高不透明度的"脏影"。
@@ -83,7 +82,6 @@ html[data-theme="black"] {
   --scrollbar-thumb: #33363f;
   --scrollbar-thumb-hover: #40434e;
   --reader-bg: #0c0d11;
-  --reader-chrome: rgba(20, 21, 26, 0.94);
   --reader-page-bg: #15161c;
 
   /* 深色下的阴影更收敛（底色本就深，靠不透明度撑层次）；
@@ -236,6 +234,39 @@ button {
   }
   to {
     opacity: 1;
+  }
+}
+/* 菜单从锚点缩放进场（配合组件上按位置设置的 transform-origin） */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+/* 居中弹窗：轻微上浮 + 放大，弹簧曲线 */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+/* 移动端底部抽屉上滑进场 */
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 /* 滚动条 */
