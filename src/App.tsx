@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import Shelf from "./components/shelf/Shelf";
@@ -98,10 +98,12 @@ export default function App() {
           const payload = event.payload as { type: string; paths?: string[] };
           if (payload.type === "drop" && payload.paths?.length) {
             try {
-              const items = await invoke<Item[]>("import_sources", {
-                paths: payload.paths,
-                targetFolder: currentFolder,
-              });
+              // 拖拽导入没有进度条遮罩，传一个不监听的空 Channel 即可
+              const items = await importSources(
+                payload.paths,
+                currentFolder,
+                new Channel()
+              );
               if (items.length > 0) {
                 await reload();
                 pushToast(`已导入 ${items.length} 部漫画`, "success");

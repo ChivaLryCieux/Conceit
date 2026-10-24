@@ -169,7 +169,11 @@ export function useReaderWindow({
     const max = el.scrollHeight - el.clientHeight;
     const f = max > 0 ? Math.min(1, Math.max(0, top / max)) : 0;
     fractionRef.current = f;
-    setFraction(f);
+    // 只在整数百分比变化时提交 state：滚动期间每个 rAF 都会算出新的
+    // 浮点值，直接 set 会让 Reader 整棵树每帧重渲染，而底栏只显示百分比
+    setFraction((prev) =>
+      Math.round(prev * 100) === Math.round(f * 100) ? prev : f
+    );
     const now = performance.now();
     if (now - lastSaveRef.current > 400) {
       lastSaveRef.current = now;
