@@ -28,19 +28,20 @@
 
 ## 快速开始
 
-环境要求：Node.js 18+、pnpm、Rust stable。
+环境要求：Node.js 20.19+（Vite 8 的下限，推荐 22+）、pnpm、Rust stable。
 
 ```bash
 pnpm install       # 安装依赖
 pnpm tauri dev     # 开发模式（热更新）
 pnpm tauri build   # 打包发布版
+pnpm lint          # oxlint（已并入 pnpm build 链）
 ```
 
-> **dev 模式说明**：请通过 `pnpm dev` / `pnpm tauri dev` 启动（已内置修复逻辑）。
-> 某些环境下 pnpm store 里的 `esbuild.exe` 被设置了低完整性级别标签（Mandatory
-> Label\Low），会导致 esbuild 服务进程无法写文件、vite 依赖预打包失败、页面白屏。
-> `scripts/dev.mjs` 会自动复制一份干净的 esbuild 并用 `ESBUILD_BINARY_PATH` 指向它，
-> 正常机器上同样无害。直接运行 `vite` 或 `npx vite` 不会经过该修复。
+> **工具链**：Vite 8 默认用 Rolldown 打包、oxc 转译与压缩，esbuild / Rollup
+> 已不在依赖链里——历史上 pnpm store 里 `esbuild.exe` 被标低完整性级别
+> 导致 dev 白屏的问题随之消失（旧版的 `scripts/dev.mjs` 绕行脚本已删除）。
+> 若再遇到同类「沙箱进程写入导致的 Low 完整性标签」问题（如 WebView2
+> 报灾难性故障），可用 `icacls <目录> /setintegritylevel medium /t /c /q` 重置。
 
 **阅读器行为验证**（可选）：`scripts/verify-reader.cjs` 通过 WebView2 远程调试（CDP）
 驱动真实 UI，自动检查浮层工具栏、点击显隐、Ctrl+滚轮缩放等行为并输出通过情况。
@@ -204,7 +205,7 @@ library/
 ## 技术架构
 
 ```
-src/                         前端（React 18 + Vite 5 + TypeScript 严格模式）
+src/                         前端（React 18 + Vite 8/Rolldown + TypeScript 严格模式）
 ├── App.tsx                  应用状态：书架 / 阅读器切换、文件夹栈、拖拽导入、Toast
 ├── api.ts                   对 Rust 命令的封装 + 书架条目排序
 ├── types.ts                 与 Rust 数据模型一一对应的类型（含 Toast）
