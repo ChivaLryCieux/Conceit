@@ -79,9 +79,9 @@
   background: var(--bg-raised);
   border: 1px solid var(--border);
   padding: 10px 16px;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   font-size: 13px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-2);
   animation: toast-in 0.18s ease-out;
   max-width: 70vw;
 }
@@ -132,8 +132,8 @@
   flex-direction: column;
   background: var(--bg-soft);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-3);
   animation: pop-in 0.14s ease-out;
 }
 
@@ -420,7 +420,7 @@
   z-index: 200;
   pointer-events: none;
   opacity: 0.92;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-2);
 }
 
 /* ---------- 书库体检 ---------- */

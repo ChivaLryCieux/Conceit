@@ -142,7 +142,7 @@
 .card-cover {
   position: relative;
   aspect-ratio: 2 / 3;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -153,7 +153,7 @@
 
 .card:hover .card-cover {
   transform: translateY(-3px);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-2);
 }
 
 .card-cover img {
@@ -288,7 +288,7 @@
 
 .card-drop-into .card-cover {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent), 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-2);
 }
 
 .drop-endline {
@@ -306,10 +306,10 @@
   min-width: 168px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   padding: 6px;
   z-index: 120;
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-2);
   animation: pop-in 0.12s ease-out;
 }
 

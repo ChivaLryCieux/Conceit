@@ -1,8 +1,19 @@
-/* 基础：变量、重置、应用外壳、按钮、通用动画（pop-in / fade-in）与全局滚动条 */
+/* 基础：变量（配色 / 材质 / 动效）、重置、应用外壳、按钮、通用动画与全局滚动条 */
 :root {
   /* 白色（默认风格）。黑色由 html[data-theme="black"] 整组覆盖，
      切换入口在书架底栏的「设置」菜单（src/theme.ts） */
   color-scheme: light;
+
+  /* ---------- 材质与动效令牌（两套主题共用） ---------- */
+
+  /* 圆角三档：控件 / 面板 / 大面板，拒绝零散取值 */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+
+  /* 苹果 sheet 曲线：快进缓停，菜单 / 弹窗 / 悬浮栏的进出都用它 */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+
   --bg: #f6f6f9;
   --bg-soft: #ffffff;
   --bg-card: #e9eaef;
@@ -27,6 +38,21 @@
   --reader-bg: #e9e9ee;
   --reader-chrome: rgba(255, 255, 255, 0.95);
   --reader-page-bg: #dcdce3;
+
+  /* 阴影三档：双层柔和低透明度（贴地 + 漫射），代替单层高不透明度的"脏影"。
+     1 = 轻浮起，2 = 悬浮面板，3 = 模态弹窗 */
+  --shadow-1: 0 1px 2px rgba(24, 25, 32, 0.05), 0 2px 8px rgba(24, 25, 32, 0.04);
+  --shadow-2: 0 2px 6px rgba(24, 25, 32, 0.07), 0 12px 32px rgba(24, 25, 32, 0.14);
+  --shadow-3: 0 4px 12px rgba(24, 25, 32, 0.1), 0 28px 64px rgba(24, 25, 32, 0.22);
+
+  /* 磨砂玻璃：solid 是 backdrop-filter 不可用时的近实底回退，
+     bg / border / fill 分别是玻璃面板底色、发丝描边、玻璃上控件的填充 */
+  --glass-solid: rgba(250, 250, 252, 0.96);
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-border: rgba(255, 255, 255, 0.75);
+  --glass-fill: rgba(255, 255, 255, 0.55);
+  --glass-blur: 20px;
+
   /* 系统栏避让高度：默认取 env()（桌面 / iOS 行为）；
      安卓上 WebView 的 env(safe-area-inset-*) 在部分设备上返回 0，
      由 useSystemBarInsets 经原生桥覆写为真实高度 */
@@ -59,6 +85,29 @@ html[data-theme="black"] {
   --reader-bg: #0c0d11;
   --reader-chrome: rgba(20, 21, 26, 0.94);
   --reader-page-bg: #15161c;
+
+  /* 深色下的阴影更收敛（底色本就深，靠不透明度撑层次）；
+     玻璃描边换成白色发丝线，深底上才有"边" */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.42), 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.46), 0 28px 64px rgba(0, 0, 0, 0.62);
+  --glass-solid: rgba(23, 25, 31, 0.96);
+  --glass-bg: rgba(24, 26, 33, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-fill: rgba(255, 255, 255, 0.08);
+}
+
+/* 磨砂玻璃面板：底栏胶囊、右键菜单、Toast、阅读器浮层共用。
+   backdrop-filter 不可用的环境回退到近实底（--glass-solid），不透出底下内容 */
+.glass {
+  background: var(--glass-solid);
+  border: 1px solid var(--glass-border);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  }
 }
 
 * {
