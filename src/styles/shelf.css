@@ -94,7 +94,7 @@
 }
 
 .crumb-sep {
-  color: #4a4e5c;
+  color: var(--text-faint);
 }
 
 .shelf-actions {

@@ -26,7 +26,7 @@
   }
 
   .btn:active {
-    background: #2e323f;
+    background: var(--bg-raised-hover);
   }
 
   .btn-primary:active {

@@ -1,23 +1,64 @@
 /* 基础：变量、重置、应用外壳、按钮、通用动画（pop-in / fade-in）与全局滚动条 */
 :root {
-  color-scheme: dark;
-  --bg: #14151a;
-  --bg-soft: #1a1c23;
-  --bg-card: #22242e;
-  --bg-raised: #262a35;
-  --border: #31343f;
-  --text: #e8e9ee;
-  --text-dim: #9aa0b0;
-  --accent: #7c6cf0;
-  --accent-hover: #8d7ff5;
-  --accent-soft: rgba(124, 108, 240, 0.18);
-  --danger: #e26d6d;
+  /* 白色（默认风格）。黑色由 html[data-theme="black"] 整组覆盖，
+     切换入口在书架底栏的「设置」菜单（src/theme.ts） */
+  color-scheme: light;
+  --bg: #f6f6f9;
+  --bg-soft: #ffffff;
+  --bg-card: #e9eaef;
+  --bg-raised: #ececf1;
+  --bg-raised-hover: #e2e3ea;
+  --border: #d9dae2;
+  --border-strong: #c6c8d3;
+  --text: #26282f;
+  --text-dim: #6c7080;
+  --text-faint: #a2a6b3;
+  --accent: #6a5ae0;
+  --accent-hover: #7a6be8;
+  --accent-soft: rgba(106, 90, 224, 0.12);
+  --danger: #d95050;
+  --danger-hover: #e26666;
+  /* 遮罩 / 进度条底 / 滚动条等随风格变化的杂项色 */
+  --scrim: rgba(24, 25, 32, 0.45);
+  --progress-track: rgba(0, 0, 0, 0.1);
+  --scrollbar-thumb: #c3c5cf;
+  --scrollbar-thumb-hover: #aeb1bd;
+  /* 阅读器（漫画背景通常偏白，白风格用浅灰衬托页与页的边界） */
+  --reader-bg: #e9e9ee;
+  --reader-chrome: rgba(255, 255, 255, 0.95);
+  --reader-page-bg: #dcdce3;
   /* 系统栏避让高度：默认取 env()（桌面 / iOS 行为）；
      安卓上 WebView 的 env(safe-area-inset-*) 在部分设备上返回 0，
      由 useSystemBarInsets 经原生桥覆写为真实高度 */
   --status-bar-h: env(safe-area-inset-top);
   --nav-bar-h: env(safe-area-inset-bottom);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+html[data-theme="black"] {
+  color-scheme: dark;
+  --bg: #14151a;
+  --bg-soft: #1a1c23;
+  --bg-card: #22242e;
+  --bg-raised: #262a35;
+  --bg-raised-hover: #2e323f;
+  --border: #31343f;
+  --border-strong: #3d4150;
+  --text: #e8e9ee;
+  --text-dim: #9aa0b0;
+  --text-faint: #4a4e5c;
+  --accent: #7c6cf0;
+  --accent-hover: #8d7ff5;
+  --accent-soft: rgba(124, 108, 240, 0.18);
+  --danger: #e26d6d;
+  --danger-hover: #ea8080;
+  --scrim: rgba(8, 9, 12, 0.68);
+  --progress-track: rgba(255, 255, 255, 0.14);
+  --scrollbar-thumb: #33363f;
+  --scrollbar-thumb-hover: #40434e;
+  --reader-bg: #0c0d11;
+  --reader-chrome: rgba(20, 21, 26, 0.94);
+  --reader-page-bg: #15161c;
 }
 
 * {
@@ -86,8 +127,8 @@ button {
 }
 
 .btn:hover {
-  background: #2e323f;
-  border-color: #3d4150;
+  background: var(--bg-raised-hover);
+  border-color: var(--border-strong);
 }
 
 .btn:active {
@@ -113,8 +154,8 @@ button {
 }
 
 .btn-danger:hover {
-  background: #ea8080;
-  border-color: #ea8080;
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
 }
 
 /* 低调的次要操作（取消选择等）：无底色，仅文字 */
@@ -156,13 +197,13 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #33363f;
+  background: var(--scrollbar-thumb);
   border-radius: 6px;
   border: 2px solid var(--bg);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #40434e;
+  background: var(--scrollbar-thumb-hover);
 }
 
 ::-webkit-scrollbar-track {

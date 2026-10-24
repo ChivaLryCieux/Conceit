@@ -1,10 +1,10 @@
-/* 浮层：忙碌遮罩、Toast、品牌标志、模态弹窗、表单与封面选页 */
+/* 浮层：忙碌遮罩、Toast、模态弹窗、表单与封面选页 */
 /* ---------- 浮层 ---------- */
 
 .busy-mask {
   position: fixed;
   inset: 0;
-  background: rgba(10, 10, 14, 0.66);
+  background: var(--scrim);
   display: grid;
   place-items: center;
   align-content: center;
@@ -29,7 +29,7 @@
   width: min(260px, 62vw);
   height: 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--progress-track);
   overflow: hidden;
 }
 
@@ -111,20 +111,12 @@
   }
 }
 
-/* ---------- 品牌标志 ---------- */
-
-.brand-mark {
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-}
-
 /* ---------- 模态弹窗 ---------- */
 
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 9, 12, 0.68);
+  background: var(--scrim);
   backdrop-filter: blur(2px);
   display: grid;
   place-items: center;

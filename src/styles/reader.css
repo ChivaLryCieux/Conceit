@@ -4,7 +4,7 @@
 .reader {
   position: fixed;
   inset: 0;
-  background: #0c0d11;
+  background: var(--reader-bg);
   z-index: 60;
 }
 
@@ -19,7 +19,7 @@
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 16px calc(10px + var(--nav-bar-h));
-  background: rgba(20, 21, 26, 0.94);
+  background: var(--reader-chrome);
   border-top: 1px solid var(--border);
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
   z-index: 2;
@@ -130,7 +130,7 @@
   width: 100%;
   overflow: hidden;
   border-radius: 6px;
-  background: #15161c;
+  background: var(--reader-page-bg);
 }
 
 .reader-page {
@@ -138,7 +138,7 @@
   height: auto;
   flex-shrink: 0;
   border-radius: 6px;
-  background: #15161c;
+  background: var(--reader-page-bg);
 }
 
 .reader-loading {
@@ -155,7 +155,7 @@
   left: 50%;
   top: calc(18px + var(--status-bar-h));
   transform: translateX(-50%);
-  background: rgba(20, 21, 26, 0.9);
+  background: var(--reader-chrome);
   border: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 12px;
