@@ -68,7 +68,7 @@
   border: 1px solid transparent;
   color: var(--text-dim);
   padding: 5px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   font-size: 13px;
   white-space: nowrap;
@@ -167,12 +167,18 @@
   border: 1px solid var(--border);
   display: grid;
   place-items: center;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s;
+  transition: transform 0.18s var(--ease-spring), box-shadow 0.18s var(--ease-spring),
+    border-color 0.15s;
 }
 
 .card:hover .card-cover {
   transform: translateY(-3px);
   box-shadow: var(--shadow-2);
+}
+
+/* 按压反馈：桌面与触屏一致（触屏的缩放系数在 mobile.css 里微调） */
+.card:active .card-cover {
+  transform: scale(0.98);
 }
 
 .card-cover img {
