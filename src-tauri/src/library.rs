@@ -1,9 +1,12 @@
 //! Conceit 书库模型：索引结构、持久化与树操作。
 //!
 //! 书库目录位于 `<app_data_dir>/library`：
-//! - `index.json`      书架索引（条目 + 每个容器内的排序）
-//! - `manga/<id>/`     每部漫画导入时复制进来的图片
+//! - `library.db`      书架索引（条目、排序、页列表、逐页尺寸、阅读进度）——SQLite
+//! - `manga/<id>/`     每部漫画导入时复制进来的图片（字节始终是普通文件）
+//! - `thumbs/<id>.jpg` 封面缩略图
+//! - `index.json`      仅旧版遗留：首次启动迁入 `library.db` 后改名 `index.json.migrated` 留底
 
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -39,6 +42,24 @@ pub const IMAGE_EXTENSIONS: [&str; 7] = ["jpg", "jpeg", "png", "webp", "gif", "b
 pub enum ItemKind {
     Manga,
     Folder,
+}
+
+impl ItemKind {
+    /// 数据库里的存储形式（与 serde 的小写形式一致，迁移时逐字对照）
+    fn as_db(&self) -> &'static str {
+        match self {
+            ItemKind::Manga => "manga",
+            ItemKind::Folder => "folder",
+        }
+    }
+
+    fn from_db(s: &str) -> Result<Self, String> {
+        match s {
+            "manga" => Ok(ItemKind::Manga),
+            "folder" => Ok(ItemKind::Folder),
+            other => Err(format!("未知条目类型: {other}")),
+        }
+    }
 }
 
 /// 漫画专属元数据
@@ -112,7 +133,224 @@ impl LibraryIndex {
         parent.unwrap_or(ROOT_KEY).to_string()
     }
 
-    pub fn load(path: &Path) -> Result<Self, String> {
+    /// 从数据库读出整个书架。
+    ///
+    /// items 按 rowid 读回，与原 `index.json` 的 Vec 顺序一致（save 是整表
+    /// 重写，rowid 顺序即写入顺序）——`children()` 的兜底分支依赖这个顺序；
+    /// pages 按 pos 读回，恢复自然排序后的页序与逐页尺寸。
+    pub fn load(conn: &Connection) -> Result<Self, String> {
+        // 1. 条目：漫画元数据先留空 pages / dims，稍后按 id 填
+        let mut items = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, kind, title, parent, show_cover, added_at,
+                            dir, cover, thumb, progress
+                     FROM items ORDER BY rowid",
+                )
+                .map_err(|e| format!("读取书架条目失败: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(ItemRow {
+                        id: row.get(0)?,
+                        kind: row.get(1)?,
+                        title: row.get(2)?,
+                        parent: row.get(3)?,
+                        show_cover: row.get(4)?,
+                        // SQLite 整数是 i64；added_at 是 Unix 秒，远在天花板之内
+                        added_at: row.get::<_, i64>(5)? as u64,
+                        dir: row.get(6)?,
+                        cover: row.get(7)?,
+                        thumb: row.get(8)?,
+                        progress: row.get(9)?,
+                    })
+                })
+                .map_err(|e| format!("读取书架条目失败: {e}"))?;
+            for row in rows {
+                let row = row.map_err(|e| format!("读取书架条目失败: {e}"))?;
+                items.push(row.into_item()?);
+            }
+        }
+
+        // 2. 页列表与尺寸：一次查出来按漫画分组（pos 即 pages 里的下标）
+        let mut pages_by_manga: HashMap<String, (Vec<String>, BTreeMap<String, (u32, u32)>)> =
+            HashMap::new();
+        {
+            let mut stmt = conn
+                .prepare("SELECT manga_id, path, width, height FROM pages ORDER BY manga_id, pos")
+                .map_err(|e| format!("读取漫画页失败: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<u32>>(2)?,
+                        row.get::<_, Option<u32>>(3)?,
+                    ))
+                })
+                .map_err(|e| format!("读取漫画页失败: {e}"))?;
+            for row in rows {
+                let (manga_id, path, w, h) =
+                    row.map_err(|e| format!("读取漫画页失败: {e}"))?;
+                let entry = pages_by_manga.entry(manga_id).or_default();
+                entry.0.push(path.clone());
+                // 宽高任一缺失（读不出尺寸的页）就不记，前端回退估算宽高比
+                if let (Some(w), Some(h)) = (w, h) {
+                    if w > 0 && h > 0 {
+                        entry.1.insert(path, (w, h));
+                    }
+                }
+            }
+        }
+        for item in &mut items {
+            if let Some(meta) = item.manga.as_mut() {
+                if let Some((pages, dims)) = pages_by_manga.remove(&item.id) {
+                    meta.pages = pages;
+                    meta.dims = dims;
+                }
+            }
+        }
+
+        // 3. 容器排序：容器键 -> 有序子条目 id（已按容器、位置排好序）
+        let mut order: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        {
+            let mut stmt = conn
+                .prepare("SELECT container, item_id FROM container_order ORDER BY container, pos")
+                .map_err(|e| format!("读取容器排序失败: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|e| format!("读取容器排序失败: {e}"))?;
+            for row in rows {
+                let (container, item_id) =
+                    row.map_err(|e| format!("读取容器排序失败: {e}"))?;
+                order.entry(container).or_default().push(item_id);
+            }
+        }
+
+        // 4. id 分配计数器；meta 里没有（异常留下的库）就从现有 id 推，
+        //    与 bump_seq_above 同一个兜底思路
+        let next_seq = read_meta(conn, "next_seq")?
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or_else(|| max_seq(&items).map(|s| s + 1).unwrap_or(1));
+
+        Ok(LibraryIndex {
+            version: INDEX_VERSION,
+            items,
+            order,
+            next_seq,
+        })
+    }
+
+    /// 把整个索引写进数据库：一个事务里整表重写。
+    ///
+    /// 与原先「序列化整个 index.json 再原子替换」同语义——先改内存、再整体
+    /// 落盘，读者要么看到旧状态、要么看到新状态，不存在中间态；事务中途
+    /// 失败（含进程被 kill）整体回滚。整表重写在几千页的量级是毫秒级
+    /// （与原 JSON 全量写同级），换来「内存模型即唯一事实来源」的简单
+    /// 正确性；阅读进度这类高频小改动走单行 UPDATE（见
+    /// [`crate::commands::save_progress`]），不必惊动整表。
+    pub fn save(&self, conn: &Connection) -> Result<(), String> {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("开始写入事务失败: {e}"))?;
+        // pages 有指向 items 的级联外键，这里仍显式删干净，顺序无关
+        tx.execute_batch("DELETE FROM pages; DELETE FROM container_order; DELETE FROM items;")
+            .map_err(|e| format!("清空书架表失败: {e}"))?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO items
+                        (id, kind, title, parent, show_cover, added_at, dir, cover, thumb, progress)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                )
+                .map_err(|e| format!("准备写入条目失败: {e}"))?;
+            for item in &self.items {
+                let (dir, cover, thumb, progress) = match &item.manga {
+                    Some(m) => (
+                        Some(m.dir.as_str()),
+                        m.cover.as_deref(),
+                        m.thumb.as_deref(),
+                        m.progress,
+                    ),
+                    None => (None, None, None, 0.0),
+                };
+                stmt.execute(params![
+                    item.id,
+                    item.kind.as_db(),
+                    item.title,
+                    item.parent,
+                    item.show_cover,
+                    item.added_at as i64,
+                    dir,
+                    cover,
+                    thumb,
+                    progress,
+                ])
+                .map_err(|e| format!("写入条目 {} 失败: {e}", item.id))?;
+            }
+        }
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO pages (manga_id, path, pos, width, height)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                )
+                .map_err(|e| format!("准备写入页失败: {e}"))?;
+            for item in &self.items {
+                let Some(meta) = item.manga.as_ref() else {
+                    continue;
+                };
+                for (pos, path) in meta.pages.iter().enumerate() {
+                    // 尺寸表里没有这一页（读不出尺寸的坏文件）就存 NULL
+                    let (w, h) = match meta.dims.get(path) {
+                        Some((w, h)) => (Some(*w), Some(*h)),
+                        None => (None, None),
+                    };
+                    stmt.execute(params![item.id, path, pos as i64, w, h])
+                        .map_err(|e| format!("写入页 {} / {} 失败: {e}", item.id, path))?;
+                }
+            }
+        }
+        {
+            // 悬空 id（手改过的旧索引可能留下）不入库，与 children() 读时的
+            // 兜底保持一致：读得回来才算数。pos 只对保留的 id 递增，
+            // 保证容器里的位置连续
+            let known: HashSet<&str> = self.items.iter().map(|i| i.id.as_str()).collect();
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO container_order (container, item_id, pos)
+                     VALUES (?1, ?2, ?3)",
+                )
+                .map_err(|e| format!("准备写入排序失败: {e}"))?;
+            for (container, ids) in &self.order {
+                let mut pos = 0i64;
+                for id in ids {
+                    if !known.contains(id.as_str()) {
+                        continue;
+                    }
+                    stmt.execute(params![container, id, pos])
+                        .map_err(|e| format!("写入排序 {container} / {id} 失败: {e}"))?;
+                    pos += 1;
+                }
+            }
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('next_seq', ?1)",
+            params![self.next_seq.to_string()],
+        )
+        .map_err(|e| format!("写入 id 计数器失败: {e}"))?;
+        tx.commit()
+            .map_err(|e| format!("提交书架写入失败: {e}"))
+    }
+
+    /// 从旧版 `index.json` 读出索引——只服务于首次启动后的一次性迁移。
+    ///
+    /// 半截 / 损坏的 JSON 不该让应用永远起不来：备份坏文件、降级为空索引
+    /// 启动。漫画文件都还在 `manga/` 下，之后用书库体检的「孤儿目录收进
+    /// 书架」能逐部捞回，比卡在启动页好得多。
+    fn load_json(path: &Path) -> Result<Self, String> {
         if !path.exists() {
             return Ok(LibraryIndex::default());
         }
@@ -124,11 +362,6 @@ impl LibraryIndex {
         match serde_json::from_str(&text) {
             Ok(index) => Ok(index),
             Err(e) => {
-                // 半截 JSON 不该让应用永远起不来：备份坏文件、降级为空索引
-                // 启动。漫画文件都还在 manga/ 下，之后用书库体检的
-                // 「孤儿目录收进书架」能逐部捞回，比卡在启动页好得多。
-                // （save 已改为原子写入，正常情况下不会再产生半截文件，
-                // 这里兜底磁盘损坏与更早版本写出的残留。）
                 let backup = path.with_extension("corrupt.json");
                 eprintln!(
                     "索引文件解析失败（已备份为 {}，降级为空索引启动）: {e}",
@@ -140,22 +373,43 @@ impl LibraryIndex {
         }
     }
 
-    pub fn save(&self, path: &Path) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("创建索引目录失败 {}: {e}", parent.display()))?;
+    /// 把旧版 `index.json` 一次性搬进数据库（老用户无感升级的入口）。
+    ///
+    /// 图片字节自始至终是普通文件，迁移只搬元数据，用户的漫画不会受影响；
+    /// 库损坏时也有降级路径（见 [`crate::db::open`]）。
+    ///
+    /// 执行条件与幂等性：
+    /// 1. `index.json` 不在 → 没什么可迁（全新安装，或上次已迁完）；
+    /// 2. 库里已有条目 → 不重放，防止把旧元数据盖回新状态；
+    /// 3. 否则在事务里读 JSON、整表写入，成功后把 JSON 改名留底。
+    ///
+    /// 中途被杀时分两种：提交前 → 事务回滚、JSON 还原样在，下次启动重跑
+    /// 一遍即可；提交后、改名前 → 库已非空，按第 2 条跳过。因此重入安全。
+    pub fn migrate_json_if_present(conn: &Connection, json_path: &Path) -> Result<usize, String> {
+        if !json_path.exists() {
+            return Ok(0);
         }
-        let text = serde_json::to_string_pretty(self).map_err(|e| format!("序列化索引失败: {e}"))?;
-        // 先写同目录临时文件再 rename：直接覆盖原文件时，进程若在写入中途
-        // 被杀（安卓上 lmkd 随时可能）会留下半截 JSON，下次启动解析失败。
-        // 同卷 rename 在 Windows / Unix 上都是原子替换，读者要么看到完整
-        // 旧文件、要么看到完整新文件，不存在中间态。
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, &text).map_err(|e| format!("写入索引文件失败 {}: {e}", tmp.display()))?;
-        fs::rename(&tmp, path).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            format!("写入索引文件失败 {}: {e}", path.display())
-        })
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+            .map_err(|e| format!("检查书架表失败: {e}"))?;
+        if count > 0 {
+            return Ok(0);
+        }
+        let index = Self::load_json(json_path)?;
+        let migrated = index.items.len();
+        index.save(conn)?;
+        // 改名留底（best-effort）。失败只是下次启动幂等重放一遍；
+        // load_json 处理损坏文件时可能已经把它改名走，这里先确认还在
+        if json_path.exists() {
+            let backup = json_path.with_extension("json.migrated");
+            if let Err(e) = fs::rename(json_path, &backup) {
+                eprintln!("留底旧索引失败 {}: {e}", backup.display());
+            }
+        }
+        if migrated > 0 {
+            eprintln!("已将旧 index.json 迁入 library.db：{migrated} 个条目");
+        }
+        Ok(migrated)
     }
 
     /// 分配一个新 id（m1 / f2 形式）
@@ -411,6 +665,79 @@ impl LibraryIndex {
             }
         }
     }
+}
+
+/// `load` 的中间行结构：kind 先按字符串取出。
+/// （`query_map` 的闭包只能返回 `rusqlite::Error`，领域错误统一在
+/// [`ItemRow::into_item`] 里转成 `String`。）
+struct ItemRow {
+    id: String,
+    kind: String,
+    title: String,
+    parent: Option<String>,
+    show_cover: bool,
+    added_at: u64,
+    dir: Option<String>,
+    cover: Option<String>,
+    thumb: Option<String>,
+    progress: f64,
+}
+
+impl ItemRow {
+    fn into_item(self) -> Result<Item, String> {
+        let kind = ItemKind::from_db(&self.kind)?;
+        let manga = if kind == ItemKind::Manga {
+            Some(MangaMeta {
+                // dir 在 MangaMeta 里不是可选的：缺失即数据损坏，报错而不是
+                // 造一部没有目录的漫画（体检的 missing_dirs 会把它翻出来）
+                dir: self
+                    .dir
+                    .ok_or_else(|| format!("漫画 {} 缺少目录记录", self.id))?,
+                cover: self.cover,
+                thumb: self.thumb,
+                pages: Vec::new(),
+                dims: BTreeMap::new(),
+                progress: self.progress,
+            })
+        } else {
+            None
+        };
+        Ok(Item {
+            id: self.id,
+            kind,
+            title: self.title,
+            parent: self.parent,
+            show_cover: self.show_cover,
+            manga,
+            added_at: self.added_at,
+        })
+    }
+}
+
+/// 读 meta 表里的一项；不存在返回 `None`
+fn read_meta(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        [key],
+        |row| row.get::<_, String>(0),
+    )
+    .map(Some)
+    .or_else(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        other => Err(format!("读取 meta.{key} 失败: {other}")),
+    })
+}
+
+/// 现有条目里最大的 id 序号（`m12` -> 12），没有则 `None`
+fn max_seq(items: &[Item]) -> Option<u64> {
+    items
+        .iter()
+        .filter_map(|i| {
+            i.id.strip_prefix('m')
+                .or_else(|| i.id.strip_prefix('f'))
+                .and_then(|s| s.parse::<u64>().ok())
+        })
+        .max()
 }
 
 /// 在内存预算内解码一张图片；超预算、格式不支持或解码器内部 panic 时返回 None。
@@ -1542,52 +1869,166 @@ mod tests {
     }
 
     #[test]
-    fn index_roundtrip_through_disk() {
-        let dir = temp_dir("index");
-        let path = dir.join("index.json");
+    fn index_roundtrips_through_database() {
+        let conn = crate::db::tests::open_in_memory().unwrap();
         let mut idx = LibraryIndex::default();
         idx.items.push(manga("m1", None));
         idx.attach("m1", None);
-        idx.save(&path).unwrap();
+        idx.save(&conn).unwrap();
 
-        let loaded = LibraryIndex::load(&path).unwrap();
+        let loaded = LibraryIndex::load(&conn).unwrap();
         assert_eq!(loaded.items.len(), 1);
         assert_eq!(loaded.order.get("root").unwrap(), &vec!["m1".to_string()]);
+        assert_eq!(loaded.next_seq, 1);
 
-        // 空文件 / 不存在都应得到默认索引
-        fs::write(&path, "").unwrap();
-        assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 0);
-
-        // 再次保存会原子替换旧文件，加载到的是新内容
+        // 再次保存是整表替换，不是追加
         idx.items.push(manga("m2", None));
         idx.attach("m2", None);
-        idx.save(&path).unwrap();
-        assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 2);
+        idx.save(&conn).unwrap();
+        let loaded = LibraryIndex::load(&conn).unwrap();
+        assert_eq!(loaded.items.len(), 2);
+        assert_eq!(
+            loaded.order.get("root").unwrap(),
+            &vec!["m1".to_string(), "m2".to_string()]
+        );
+    }
 
-        // 保存后不残留临时文件
-        assert!(!dir.join("index.json.tmp").exists());
+    #[test]
+    fn save_preserves_page_order_dims_and_progress() {
+        let conn = crate::db::tests::open_in_memory().unwrap();
+        let mut idx = LibraryIndex::default();
+        let mut item = manga("m1", None);
+        let meta = item.manga.as_mut().unwrap();
+        meta.pages = vec!["002.jpg".into(), "001.jpg".into(), "sub/003.png".into()];
+        meta.dims.insert("001.jpg".into(), (600, 900));
+        meta.dims.insert("sub/003.png".into(), (800, 1200)); // 002.jpg 读不出尺寸
+        meta.progress = 0.42;
+        meta.cover = Some("002.jpg".into());
+        meta.thumb = Some("thumbs/m1.jpg".into());
+        idx.items.push(item);
+        idx.attach("m1", None);
+        idx.save(&conn).unwrap();
+
+        let loaded = LibraryIndex::load(&conn).unwrap();
+        let meta = loaded.item("m1").unwrap().manga.as_ref().unwrap();
+        // 页顺序按 pos 原样恢复（含子目录路径）
+        assert_eq!(meta.pages, vec!["002.jpg", "001.jpg", "sub/003.png"]);
+        // 尺寸逐页对齐；缺尺寸的页不进 dims
+        assert_eq!(meta.dims.get("001.jpg"), Some(&(600, 900)));
+        assert_eq!(meta.dims.get("sub/003.png"), Some(&(800, 1200)));
+        assert!(!meta.dims.contains_key("002.jpg"));
+        // 其余字段无损
+        assert_eq!(meta.progress, 0.42);
+        assert_eq!(meta.cover.as_deref(), Some("002.jpg"));
+        assert_eq!(meta.thumb.as_deref(), Some("thumbs/m1.jpg"));
+    }
+
+    #[test]
+    fn load_skips_dangling_order_ids() {
+        // 手改过的旧索引可能留下指向不存在条目的顺序项：入库时过滤，
+        // 读回来的容器里只应有真实存在的条目
+        let conn = crate::db::tests::open_in_memory().unwrap();
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga("m1", None));
+        idx.attach("m1", None);
+        idx.order.insert("root".into(), vec!["m1".into(), "m404".into()]);
+        idx.save(&conn).unwrap();
+
+        let loaded = LibraryIndex::load(&conn).unwrap();
+        assert_eq!(loaded.order.get("root").unwrap(), &vec!["m1".to_string()]);
+    }
+
+    #[test]
+    fn migrate_moves_old_json_into_database() {
+        let conn = crate::db::tests::open_in_memory().unwrap();
+        let dir = temp_dir("migrate");
+        let json = dir.join(INDEX_FILE_NAME);
+        // 手写一份「老格式」索引：故意缺 show_cover / thumb / dims / progress
+        // （serde 默认值兜底，模拟更早版本的数据），含文件夹、漫画、页与尺寸
+        let text = r#"{
+          "version": 1,
+          "next_seq": 7,
+          "items": [
+            {"id":"f1","kind":"folder","title":"文件夹","parent":null,"added_at":100},
+            {"id":"m3","kind":"manga","title":"老漫画","parent":"f1","added_at":200,
+             "manga":{"dir":"manga/m3","cover":"002.jpg","pages":["002.jpg","001.jpg"],
+                      "dims":{"001.jpg":[600,900]}}}
+          ],
+          "order": {"root":["f1"], "f1":["m3"]}
+        }"#;
+        fs::write(&json, text).unwrap();
+
+        let n = LibraryIndex::migrate_json_if_present(&conn, &json).unwrap();
+        assert_eq!(n, 2);
+        // JSON 改名留底，不再参与后续读取
+        assert!(!json.exists());
+        assert!(dir.join("index.json.migrated").exists());
+
+        let idx = LibraryIndex::load(&conn).unwrap();
+        assert_eq!(idx.next_seq, 7);
+        assert_eq!(idx.order.get("root").unwrap(), &vec!["f1".to_string()]);
+        assert_eq!(idx.order.get("f1").unwrap(), &vec!["m3".to_string()]);
+
+        let m = idx.item("m3").unwrap();
+        assert_eq!(m.parent.as_deref(), Some("f1"));
+        assert!(!m.show_cover); // serde 默认
+        let meta = m.manga.as_ref().unwrap();
+        assert_eq!(meta.pages, vec!["002.jpg", "001.jpg"]); // 顺序保持
+        assert_eq!(meta.dims.get("001.jpg"), Some(&(600, 900)));
+        assert!(!meta.dims.contains_key("002.jpg")); // 缺尺寸的页不回填
+        assert_eq!(meta.progress, 0.0); // serde 默认
+        assert!(meta.thumb.is_none());
+        assert!(idx.item("f1").unwrap().manga.is_none());
+
         fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn load_recovers_from_corrupt_index_file() {
-        let dir = temp_dir("index-corrupt");
-        let path = dir.join("index.json");
-        fs::write(&path, "{ 这不是合法 json").unwrap();
+    fn migrate_json_is_idempotent() {
+        let conn = crate::db::tests::open_in_memory().unwrap();
+        let dir = temp_dir("migrate-idem");
+        let json = dir.join(INDEX_FILE_NAME);
+        fs::write(&json, r#"{"version":1,"items":[],"order":{},"next_seq":1}"#).unwrap();
 
-        // 半截 / 损坏的索引：备份坏文件后降级为空索引，而不是让应用起不来
-        let idx = LibraryIndex::load(&path).unwrap();
-        assert!(idx.items.is_empty());
-        assert!(!path.exists());
-        let backup = dir.join("index.corrupt.json");
-        assert!(backup.exists());
+        // 第一次：搬完（0 个条目）并把 JSON 改名留底
+        assert_eq!(LibraryIndex::migrate_json_if_present(&conn, &json).unwrap(), 0);
+        assert!(!json.exists());
 
-        // 降级后可以正常继续保存 / 加载
+        // JSON 不在了 → 直接跳过
+        assert_eq!(LibraryIndex::migrate_json_if_present(&conn, &json).unwrap(), 0);
+
+        // 模拟「提交成功但改名前被杀」：JSON 还在，但库已非空 → 仍不重放
         let mut idx = LibraryIndex::default();
         idx.items.push(manga("m1", None));
         idx.attach("m1", None);
-        idx.save(&path).unwrap();
-        assert_eq!(LibraryIndex::load(&path).unwrap().items.len(), 1);
+        idx.save(&conn).unwrap();
+        fs::write(&json, r#"{"version":1,"items":[],"order":{},"next_seq":1}"#).unwrap();
+        assert_eq!(LibraryIndex::migrate_json_if_present(&conn, &json).unwrap(), 0);
+        assert!(json.exists()); // 没被改名
+        assert_eq!(LibraryIndex::load(&conn).unwrap().items.len(), 1); // 库数据没被动
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn migrate_survives_corrupt_index_json() {
+        let conn = crate::db::tests::open_in_memory().unwrap();
+        let dir = temp_dir("migrate-corrupt");
+        let json = dir.join(INDEX_FILE_NAME);
+        fs::write(&json, "{ 这不是合法 json").unwrap();
+
+        // 损坏的 JSON：备份后降级为空索引，迁移本身不算失败
+        let n = LibraryIndex::migrate_json_if_present(&conn, &json).unwrap();
+        assert_eq!(n, 0);
+        assert!(!json.exists());
+        assert!(dir.join("index.corrupt.json").exists());
+
+        // 之后正常存取不受影响
+        let mut idx = LibraryIndex::default();
+        idx.items.push(manga("m1", None));
+        idx.attach("m1", None);
+        idx.save(&conn).unwrap();
+        assert_eq!(LibraryIndex::load(&conn).unwrap().items.len(), 1);
 
         fs::remove_dir_all(&dir).ok();
     }

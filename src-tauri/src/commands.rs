@@ -1,11 +1,13 @@
 //! Tauri 命令层：书库快照、文件夹、重命名、删除、移动、排序与阅读进度。
 
+use crate::db;
 use crate::library::{
     build_health_report, copy_dir_all, copy_images_into_manga, delete_manga_files,
     dir_total_bytes, extract_zip, make_cover_thumb, now_unix, remove_cover_thumb, same_page_set,
     scan_images, title_from_path, zip_total_bytes, HealthReport, Item, ItemKind, LibraryIndex,
     MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -34,10 +36,11 @@ pub struct ImportProgress {
     pub total_bytes: u64,
 }
 
-/// 应用共享状态：书库根目录 + 索引
+/// 应用共享状态：书库根目录 + 书架索引数据库 + 内存中的索引
 pub struct AppState {
     pub root: PathBuf,
-    pub index_path: PathBuf,
+    /// 书架索引数据库（`library.db`）：条目的增删改查都落在这里
+    pub conn: Connection,
     pub index: LibraryIndex,
     /// 高频小改动（阅读进度）只改内存并标脏，由后台线程定期落盘；
     /// 任何走 save() 的写操作都会顺带冲掉该标记
@@ -53,11 +56,16 @@ impl AppState {
     pub fn new(root: PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(&root)
             .map_err(|e| format!("创建书库目录失败 {}: {e}", root.display()))?;
-        let index_path = root.join(INDEX_FILE_NAME);
-        let index = LibraryIndex::load(&index_path)?;
+        let conn = db::open(&root.join(db::DB_FILE_NAME))?;
+        // 旧版 index.json 一次性迁入数据库（老用户无感升级）。
+        // 图片文件自始至终是普通文件，迁移只搬元数据；迁完改名留底，
+        // 之后启动就不再读取它
+        let json_path = root.join(INDEX_FILE_NAME);
+        LibraryIndex::migrate_json_if_present(&conn, &json_path)?;
+        let index = LibraryIndex::load(&conn)?;
         Ok(AppState {
             root,
-            index_path,
+            conn,
             index,
             pending_flush: false,
             last_write: None,
@@ -65,7 +73,7 @@ impl AppState {
     }
 
     fn save(&mut self) -> Result<(), String> {
-        let result = self.index.save(&self.index_path);
+        let result = self.index.save(&self.conn);
         if result.is_ok() {
             self.pending_flush = false;
             self.last_write = Some(Instant::now());
