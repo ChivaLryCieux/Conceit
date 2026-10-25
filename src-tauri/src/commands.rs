@@ -7,7 +7,7 @@ use crate::library::{
     scan_images, title_from_path, zip_total_bytes, HealthReport, Item, ItemKind, LibraryIndex,
     MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -42,15 +42,7 @@ pub struct AppState {
     /// 书架索引数据库（`library.db`）：条目的增删改查都落在这里
     pub conn: Connection,
     pub index: LibraryIndex,
-    /// 高频小改动（阅读进度）只改内存并标脏，由后台线程定期落盘；
-    /// 任何走 save() 的写操作都会顺带冲掉该标记
-    pending_flush: bool,
-    /// 上次索引落盘时间，save_progress 据此做写盘节流
-    last_write: Option<Instant>,
 }
-
-/// 阅读进度写盘的最小间隔：窗口内只改内存标脏，由后台线程凑满窗口再落盘
-const PROGRESS_WRITE_MIN_INTERVAL: Duration = Duration::from_secs(2);
 
 impl AppState {
     pub fn new(root: PathBuf) -> Result<Self, String> {
@@ -63,22 +55,40 @@ impl AppState {
         let json_path = root.join(INDEX_FILE_NAME);
         LibraryIndex::migrate_json_if_present(&conn, &json_path)?;
         let index = LibraryIndex::load(&conn)?;
-        Ok(AppState {
-            root,
-            conn,
-            index,
-            pending_flush: false,
-            last_write: None,
-        })
+        Ok(AppState { root, conn, index })
     }
 
+    /// 结构性改动后整表落盘（内存索引是唯一事实来源）
     fn save(&mut self) -> Result<(), String> {
-        let result = self.index.save(&self.conn);
-        if result.is_ok() {
-            self.pending_flush = false;
-            self.last_write = Some(Instant::now());
+        self.index.save(&self.conn)
+    }
+
+    /// 保存阅读进度：内存索引与数据库行同步更新。
+    ///
+    /// 进度是单行数据，直接 `UPDATE` 落盘即可——原先受制于 index.json
+    /// 全量重写，需要「2 秒节流窗口 + 后台线程冲刷」兜着；SQLite 之后
+    /// 这笔写入是微秒级，节流机制随之退役，进程被杀最多丢最后一条
+    /// （约 400ms），对阅读位置无感。
+    ///
+    /// 内存索引仍是唯一事实来源：这一笔 UPDATE 只是把同一份值落到对应行。
+    /// 写失败（如磁盘满）不影响内存，下一次结构性 save() 会整表纠正。
+    fn save_progress(&mut self, id: &str, progress: f64) -> Result<(), String> {
+        let value = progress.clamp(0.0, 1.0);
+        let item = self
+            .index
+            .item_mut(id)
+            .ok_or_else(|| "条目不存在".to_string())?;
+        if let Some(meta) = item.manga.as_mut() {
+            meta.progress = value;
         }
-        result
+        // 条目不存在时影响行数为 0，不算错误（与「非漫画静默跳过」一致）
+        self.conn
+            .execute(
+                "UPDATE items SET progress = ?1 WHERE id = ?2",
+                params![value, id],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("保存阅读进度失败: {e}"))
     }
 }
 
@@ -454,11 +464,10 @@ pub fn library_health_clean(
 
 /// 保存阅读进度（0.0 - 1.0）
 ///
-/// 阅读时前端约每 400ms 报一次进度，每次都全量序列化整个索引落盘
-/// （书库大了 index.json 有数 MB）对闪存不友好：距上次落盘不足
-/// [`PROGRESS_WRITE_MIN_INTERVAL`] 时只改内存并标脏，由后台线程定期
-/// 冲刷（[`flush_pending_writes`]）。代价是进程被杀时最多丢最后约
-/// 2 秒的进度（原先为 400ms），对阅读位置无感。
+/// 阅读时前端约每 400ms 报一次进度。进度是单行数据，直接
+/// `UPDATE items SET progress` 落盘即可——原先受制于 index.json 全量重写，
+/// 需要「2 秒节流窗口 + 后台线程冲刷」兜着；SQLite 之后这笔写入是微秒级，
+/// 节流机制随之退役，进程被杀最多丢最后一条（约 400ms），对阅读位置无感。
 #[tauri::command]
 pub fn save_progress(
     state: State<'_, Mutex<AppState>>,
@@ -466,42 +475,7 @@ pub fn save_progress(
     progress: f64,
 ) -> Result<(), String> {
     let mut st = lock(&state)?;
-    let item = st
-        .index
-        .item_mut(&id)
-        .ok_or_else(|| "条目不存在".to_string())?;
-    if let Some(meta) = item.manga.as_mut() {
-        meta.progress = progress.clamp(0.0, 1.0);
-    }
-    if st
-        .last_write
-        .is_some_and(|t| t.elapsed() < PROGRESS_WRITE_MIN_INTERVAL)
-    {
-        st.pending_flush = true;
-        return Ok(());
-    }
-    st.save()
-}
-
-/// 冲刷延迟落盘的阅读进度：lib.rs 的后台线程每秒调用一次。
-/// 与 save_progress 用同一个节流窗口——凑满 2 秒、且有脏数据才真正写盘。
-pub fn flush_pending_writes(state: &State<'_, Mutex<AppState>>) {
-    let mut st = match lock(state) {
-        Ok(st) => st,
-        Err(_) => return,
-    };
-    if !st.pending_flush {
-        return;
-    }
-    if st
-        .last_write
-        .is_some_and(|t| t.elapsed() < PROGRESS_WRITE_MIN_INTERVAL)
-    {
-        return;
-    }
-    if let Err(e) = st.save() {
-        eprintln!("落盘延迟的阅读进度失败: {e}");
-    }
+    st.save_progress(&id, progress)
 }
 
 /// 取一部漫画全部图片的绝对路径（前端经 asset 协议加载）
@@ -927,4 +901,68 @@ pub fn reorder_manga_pages(
         .item(&id)
         .cloned()
         .ok_or_else(|| "条目不存在".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "conceit-cmd-{tag}-{}",
+            crate::library::now_unix()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 进度走单行 UPDATE 落盘后，重开应用状态（重新 load）应原样读回——
+    /// 覆盖「内存有、磁盘无」的中间态不可能残留
+    #[test]
+    fn progress_survives_app_restart() {
+        let root = temp_root("progress");
+        let mut state = AppState::new(root.clone()).unwrap();
+        let item = state.index.insert_empty_manga("进度测试", None);
+        state.save().unwrap();
+
+        state.save_progress(&item.id, 0.37).unwrap();
+        drop(state);
+        let mut state = AppState::new(root.clone()).unwrap();
+        let progress = |s: &AppState| {
+            s.index
+                .item(&item.id)
+                .and_then(|i| i.manga.as_ref())
+                .map(|m| m.progress)
+        };
+        assert_eq!(progress(&state), Some(0.37));
+
+        // 越界值被夹紧；夹紧后的值同样要落到数据库行里
+        state.save_progress(&item.id, 1.9).unwrap();
+        assert_eq!(progress(&state), Some(1.0));
+        drop(state);
+        let state = AppState::new(root.clone()).unwrap();
+        assert_eq!(progress(&state), Some(1.0));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// 全新书库：启动即建库，快照与写入都不依赖旧 index.json
+    #[test]
+    fn fresh_library_starts_empty_and_persists() {
+        let root = temp_root("fresh");
+        let mut state = AppState::new(root.clone()).unwrap();
+        assert!(state.index.items.is_empty());
+        assert_eq!(state.index.next_seq, 1);
+
+        let item = state.index.insert_empty_manga("新漫画", None);
+        state.save().unwrap();
+        drop(state);
+
+        let state = AppState::new(root.clone()).unwrap();
+        let loaded = state.index.item(&item.id).expect("重开后条目应在");
+        assert_eq!(loaded.title, "新漫画");
+        assert_eq!(state.index.next_seq, 2); // 计数器随 meta 落盘
+
+        std::fs::remove_dir_all(&root).ok();
+    }
 }

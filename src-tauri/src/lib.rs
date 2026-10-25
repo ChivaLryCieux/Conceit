@@ -34,15 +34,6 @@ pub fn run() {
                     Err(e) => eprintln!("补生成封面缩略图失败: {e}"),
                 }
             });
-
-            // 阅读进度的延迟落盘：save_progress 在 2 秒窗口内只标脏，
-            // 这里每秒检查一次、凑满窗口就冲刷，避免高频全量写 index.json
-            let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                let state = handle.state::<Mutex<commands::AppState>>();
-                commands::flush_pending_writes(&state);
-            });
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
