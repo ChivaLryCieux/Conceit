@@ -109,8 +109,12 @@ function buildRust() {
   for (const t of TARGETS) {
     log(`编译 Rust 库：${t.rust}`);
     const linker = path.join(bin, t.clang);
+    const ar = path.join(bin, "llvm-ar.exe");
     if (!existsSync(linker)) {
       die(`找不到 NDK 链接器 ${linker}`);
+    }
+    if (!existsSync(ar)) {
+      die(`找不到 NDK 归档工具 ${ar}`);
     }
     // custom-protocol 决定 tauri 走「打包进 assets 的自定义协议」还是「devUrl」：
     // 官方 `tauri android build` 会传这个特性，漏了的话打出来的包会去连开发服务器。
@@ -123,6 +127,11 @@ function buildRust() {
           ...process.env,
           NDK_HOME: ndk,
           [`CARGO_TARGET_${t.rust.toUpperCase().replace(/-/g, "_")}_LINKER`]: linker,
+          // rusqlite 的 bundled SQLite 要在安卓上编 C 源码：cc 只认 CC / AR
+          // 这两个环境变量（cc 自己的查找顺序是 CC_<三元组>、CC_<下划线三元组>、CC），
+          // 不设的话它会退回去找宿主机的 clang.exe 而失败
+          [`CC_${t.rust}`]: linker,
+          [`AR_${t.rust}`]: ar,
         },
       }
     );

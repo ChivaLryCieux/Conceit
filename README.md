@@ -109,11 +109,15 @@ pnpm tauri ios build
 本仓库改用 `scripts/build-android.mjs` 完成同样的搬运（普通文件复制），再直接调用 Gradle，
 产物与官方流程一致。签名配置也已配好，产出的就是可直接安装的 release APK。
 
-> **两个必须复刻的细节**（脚本已处理，手工跑 cargo 时容易漏）：
+> **三个必须复刻的细节**（脚本已处理，手工跑 cargo 时容易漏）：
 > 1. `cargo build` 必须带 `--features tauri/custom-protocol`。这个特性决定 tauri 走
 >    「内嵌 assets 的自定义协议」还是「devUrl」；漏了的话打出来的包能装上，一打开却提示
 >    连不上 `http://localhost:1420`（`tauri::is_dev()` 实际就是 `!cfg!(feature = "custom-protocol")`）。
 > 2. NDK 的 `libc++_shared.so` 要和 `libconceit_lib.so` 一起放进 jniLibs，否则启动即崩。
+> 3. rusqlite 的 bundled SQLite 要在安卓上编 C 源码，必须给 cargo 设
+>    `CC_<三元组>`（NDK 的 `clang.cmd`）与 `AR_<三元组>`（`llvm-ar.exe`）。
+>    只设 linker 不够——cc 编译 C 时不看 linker 变量，会退回去找宿主机的
+>    `clang.exe` 并失败。脚本已按目标三元组自动设置。
 
 **前置环境**（缺失时脚本会明确报错）：
 
@@ -121,7 +125,7 @@ pnpm tauri ios build
 |---|---|
 | `JAVA_HOME` | JDK 17+ |
 | `ANDROID_HOME` | Android SDK（需含 `platforms;android-37`、`build-tools`） |
-| `ANDROID_NDK_HOME` | Android NDK（脚本会从里面取 `clang.cmd` 链接器和 `libc++_shared.so`） |
+| `ANDROID_NDK_HOME` | Android NDK（脚本会从里面取 `clang.cmd` 链接器 / C 编译器、`llvm-ar.exe` 与 `libc++_shared.so`） |
 
 Rust 交叉编译目标只需装一次：
 
@@ -144,7 +148,9 @@ node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
 Gradle 的原始产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`，
 打包脚本会额外复制一份到仓库根目录、按 `Conceit-<版本>-release.apk` 命名
 （版本取自 `tauri.conf.json`，如 `Conceit-0.2.0-release.apk`），方便直接传手机安装；
-arm64-v8a + armeabi-v7a 通用包，约 13 MB，minSdk 24 / Android 7.0+。
+arm64-v8a + armeabi-v7a 通用包，约 17 MB（含 rusqlite 内置编译的 SQLite，
+两个 ABI 各一份；如在意体积可在编译 C 时加 `-DSQLITE_OMIT_FTS5` 等宏裁掉用不到的
+全文检索 / RTREE 特性），minSdk 24 / Android 7.0+。
 
 > Gradle 首次运行需要下载 Gradle 发行版与 AGP 等依赖；国内网络下 `services.gradle.org`
 > 可能很慢，可先从镜像下载 `gradle-9.6.1-bin.zip` 解压到本地，脚本会优先使用本地安装。
