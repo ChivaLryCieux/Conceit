@@ -26,6 +26,7 @@ image = { version = "0.25", default-features = false, features = [
     "gif",
     "bmp",
 ] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 
 [profile.release]
 # 不用 panic = "abort"：解码 / 解压路径靠 catch_unwind 把库内 panic

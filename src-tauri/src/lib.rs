@@ -1,6 +1,7 @@
 //! Conceit 漫画阅读器 — Tauri 应用库入口。
 
 mod commands;
+pub mod db;
 mod library;
 mod mobile_import;
 
