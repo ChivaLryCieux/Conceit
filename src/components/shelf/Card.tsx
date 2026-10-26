@@ -57,7 +57,17 @@ export default function Card({
     item.manga?.thumb ??
     (coverPage ? `${item.manga!.dir}/${coverPage}` : null);
   const showImage = !isFolder && item.show_cover && coverFile != null;
-  const coverUrl = showImage ? convertFileSrc(`${root}/${coverFile}`) : null;
+  /* 换封面时 Rust 覆盖的是同一个 thumbs/<id>.jpg——URL 一个字都不变。
+   * 而 Tauri 的 asset 协议响应不带 Cache-Control / ETag / Last-Modified，
+   * WebView 只能按启发式缓存：URL 不变就永远拿第一次那张位图，于是
+   * 「第一次设封面成功、之后再换都停在旧封面」（安卓尤其明显）。
+   * 用封面页名做版本号：换封面它必然变，URL 随之变，缓存自然绕开；
+   * asset 协议只取 path 部分，查询参数不影响找文件。 */
+  const coverUrl = showImage
+    ? `${convertFileSrc(`${root}/${coverFile}`)}?v=${encodeURIComponent(
+        coverPage ?? coverFile!
+      )}`
+    : null;
   const progress = item.manga?.progress ?? 0;
   const pageCount = item.manga?.pages.length ?? 0;
   const solid = solidColor(item.id);

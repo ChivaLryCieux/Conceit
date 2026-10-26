@@ -519,11 +519,22 @@ pub fn update_item_settings(
     cover: Option<String>,
 ) -> Result<(), String> {
     let mut st = lock(&state)?;
+    apply_item_settings(&mut st, &id, title, show_cover, cover)
+}
+
+/// 设置更新的实际逻辑。与 `State` 解耦，便于单测（State 在测试里构造不出来）。
+fn apply_item_settings(
+    st: &mut AppState,
+    id: &str,
+    title: Option<String>,
+    show_cover: Option<bool>,
+    cover: Option<String>,
+) -> Result<(), String> {
     // root 先克隆出来：之后 item_mut 可变借用的是 index 字段，与 root 无冲突
     let root = st.root.clone();
     let item = st
         .index
-        .item_mut(&id)
+        .item_mut(id)
         .ok_or_else(|| "条目不存在".to_string())?;
     if let Some(t) = title {
         let t = t.trim().to_string();
@@ -544,7 +555,7 @@ pub fn update_item_settings(
         }
         meta.cover = Some(c.clone());
         // 封面页变了，缩略图要跟着重新生成（生成失败则置空，回退原图）
-        meta.thumb = make_cover_thumb(&root, &id, &c);
+        meta.thumb = make_cover_thumb(&root, id, &c);
     }
     st.save()
 }
@@ -1092,6 +1103,78 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
+    /// 换封面必须同时改 cover 与 thumb：thumb 还是旧的那张，书架就会一直
+    /// 显示上一任封面（前端 URL 不带变化，WebView 缓存直接命中）。
+    /// 这条测试守住 Rust 这一半；前端那一半见 Card.tsx 的 coverUrl 版本号。
+    #[test]
+    fn update_item_settings_rebuilds_cover_thumb() {
+        let root = temp_root("cover-switch");
+        let mut state = AppState::new(root.clone()).unwrap();
+        let item = state.index.insert_empty_manga("封面切换", None);
+        let dir = root.join(MANGA_DIR_NAME).join(&item.id);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 两张都超过缩略图阈值的大图，否则 make_cover_thumb 会嫌原图够小而返回 None
+        for name in ["a.png", "b.png"] {
+            let img = image::RgbImage::from_fn(1200, 900, |x, y| {
+                image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+            });
+            img.save(dir.join(name)).unwrap();
+        }
+        {
+            let meta = state
+                .index
+                .item_mut(&item.id)
+                .unwrap()
+                .manga
+                .as_mut()
+                .unwrap();
+            meta.pages = vec!["a.png".into(), "b.png".into()];
+            meta.cover = Some("a.png".into());
+            meta.thumb = make_cover_thumb(&root, &item.id, "a.png");
+        }
+        state.save().unwrap();
+        let thumb_rel = state
+            .index
+            .item(&item.id)
+            .unwrap()
+            .manga
+            .as_ref()
+            .unwrap()
+            .thumb
+            .clone()
+            .expect("大图应生成缩略图");
+        assert_eq!(thumb_rel, format!("{}/{}.jpg", crate::library::THUMB_DIR_NAME, item.id));
+
+        // 换封面：cover 与 thumb 都要跟着走
+        apply_item_settings(
+            &mut state,
+            &item.id,
+            None,
+            None,
+            Some("b.png".to_string()),
+        )
+        .unwrap();
+        {
+            let meta = state.index.item(&item.id).unwrap().manga.as_ref().unwrap();            assert_eq!(meta.cover.as_deref(), Some("b.png"));
+            assert_eq!(meta.thumb.as_deref(), Some(thumb_rel.as_str()));
+        }
+        // 落盘后重开也要读回新封面（数据库那半也得对）
+        drop(state);
+        let state = AppState::new(root.clone()).unwrap();
+        let meta = state.index.item(&item.id).unwrap().manga.as_ref().unwrap();
+        assert_eq!(meta.cover.as_deref(), Some("b.png"));
+        assert_eq!(meta.thumb.as_deref(), Some(thumb_rel.as_str()));
+
+        // 封面不是这一漫画的页：拒绝（state 重新绑定成 mut 只为这一次调用）
+        let mut state = AppState::new(root.clone()).unwrap();
+        let err =
+            apply_item_settings(&mut state, &item.id, None, None, Some("不存在的页.png".to_string()))
+                .unwrap_err();
+        assert_eq!(err, "封面必须是该漫画的某一页");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
     /// 桌面端落盘：zip 挪进目标目录（源消失），同名时加序号、不动旧文件
     #[test]
     #[cfg(not(target_os = "android"))]
@@ -1170,7 +1253,7 @@ mod tests {
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
         assert_eq!(archive.len(), 3);
         for i in 0..3usize {
-            let mut page = archive.by_index(i).unwrap();
+            let page = archive.by_index(i).unwrap();
             let expected = format!("{:03}.png", i + 1);
             assert_eq!(page.name(), expected.as_str());
             // 序号严格按阅读顺序：001 = a.png、002 = b.png、003 = c.png
