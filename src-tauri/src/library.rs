@@ -1493,6 +1493,121 @@ pub fn zip_total_bytes(src: &Path) -> u64 {
     total
 }
 
+/// 把标题变成能当文件名的字符串：路径分隔符、Windows 保留字符、控制字符
+/// 都可能让文件创建失败或写到别处，统一替换；首尾的点与空格在部分文件系统上
+/// 会被静默去掉，也一并清掉。安卓的 MediaStore / SAF 同样不接受这些字符。
+pub fn sanitize_zip_name(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0' => '_',
+            c if (c as u32) < 0x20 => ' ',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches(|c| c == '.' || c == ' ').trim();
+    // 超长标题在 ext4（255 字节）/ NTFS（255 字符）上会直接创建失败，按字符截断
+    let capped: String = trimmed.chars().take(60).collect();
+    if capped.trim().is_empty() {
+        "漫画".to_string()
+    } else {
+        capped
+    }
+}
+
+/// 目标目录里已有同名文件时，在扩展名前插入 " (n)"——导出是读者自己的资产，
+/// 绝不能静默覆盖上一次的导出结果。
+pub fn unique_dest_path(dir: &Path, file_name: &str) -> PathBuf {
+    let candidate = dir.join(file_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let dot = file_name.rfind('.').filter(|i| *i > 0);
+    let stem = dot.map(|i| &file_name[..i]).unwrap_or(file_name);
+    let ext = dot.map(|i| &file_name[i + 1..]);
+    for n in 1..1000 {
+        let name = match ext {
+            Some(ext) => format!("{stem} ({n}).{ext}"),
+            None => format!("{stem} ({n})"),
+        };
+        let next = dir.join(name);
+        if !next.exists() {
+            return next;
+        }
+    }
+    // 999 个同名文件：退回带时间戳的名字，保证一定写得进去
+    dir.join(format!("{stem} ({})", now_unix()))
+}
+
+/// 把一部漫画打包成 zip：条目按阅读顺序（索引顺序）编号写入。
+///
+/// 为什么改名成 `001.jpg`：解压工具一律按名字排序显示，而原文件名与阅读顺序
+/// 未必一致（设置里可以拖动排序）；前导零的序号在任何解压器里都能保持阅读
+/// 顺序，扩展名沿用原文件。索引与磁盘不一致（缺文件）时跳过该页，一页都没
+/// 写进去才算失败。
+///
+/// 返回 (读到的源字节数, 条目数)；`on_progress` 按读到的字节回调，节流由调用方负责。
+pub fn build_manga_zip(
+    manga_dir: &Path,
+    pages: &[String],
+    dest: &Path,
+    on_progress: &mut dyn FnMut(u64),
+) -> Result<(u64, usize), String> {
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("创建导出目录失败 {}: {e}", parent.display()))?;
+        }
+    }
+    let file =
+        fs::File::create(dest).map_err(|e| format!("创建 zip 文件失败 {}: {e}", dest.display()))?;
+    let mut writer = zip::ZipWriter::new(std::io::BufWriter::new(file));
+    // 漫画页基本都是已压缩过的位图：高档位只会更慢、体积几乎不变，1 档够用
+    let opts: zip::write::SimpleFileOptions = zip::write::FileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(1));
+    let mut written = 0u64;
+    let mut entries = 0usize;
+    for (pos, page) in pages.iter().enumerate() {
+        let src = manga_dir.join(page);
+        // 体检能查出的「索引有、磁盘无」，跳过而不是让整次导出失败
+        if !src.is_file() {
+            continue;
+        }
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg")
+            .to_string();
+        let entry = format!("{:03}.{ext}", pos + 1);
+        writer
+            .start_file(&entry, opts)
+            .map_err(|e| format!("写入 zip 条目 {entry} 失败: {e}"))?;
+        let mut f =
+            fs::File::open(&src).map_err(|e| format!("读取图片失败 {}: {e}", src.display()))?;
+        let copied =
+            std::io::copy(&mut f, &mut writer).map_err(|e| format!("打包 {entry} 失败: {e}"))?;
+        written += copied;
+        entries += 1;
+        on_progress(copied);
+    }
+    // finish 只写中央目录，还要把 BufWriter 里缓存的字节真正落到磁盘
+    let buf = writer
+        .finish()
+        .map_err(|e| format!("收尾 zip 文件失败: {e}"))?;
+    let mut out = buf
+        .into_inner()
+        .map_err(|e| format!("收尾 zip 文件失败: {e}"))?;
+    use std::io::Write;
+    out.flush().map_err(|e| format!("收尾 zip 文件失败: {e}"))?;
+    if entries == 0 {
+        // 空 zip 没有意义，还会让前端误以为导出成功；把半成品删掉再报错
+        let _ = fs::remove_file(dest);
+        return Err("没有可导出的图片".to_string());
+    }
+    Ok((written, entries))
+}
+
 /// 从路径推断一个可读的标题
 pub fn title_from_path(path: &Path) -> String {
     path.file_stem()
@@ -1821,6 +1936,101 @@ mod tests {
         fs::write(root.join("bad.zip"), b"PK\x03\x04 nope").unwrap();
         assert_eq!(zip_total_bytes(&root.join("bad.zip")), 0);
         assert_eq!(zip_total_bytes(&root.join("missing.zip")), 0);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn sanitize_zip_name_strips_illegal_characters() {
+        assert_eq!(sanitize_zip_name("海贼王"), "海贼王");
+        // Windows 保留字符与路径分隔符：一个都不能留
+        assert_eq!(sanitize_zip_name("a/b\\c:d*e?f\"g<h>i|j"), "a_b_c_d_e_f_g_h_i_j");
+        // 控制字符（换行 / 制表符）压成空格，首尾点与空格清掉
+        assert_eq!(sanitize_zip_name(" line\nbreak "), "line break");
+        assert_eq!(sanitize_zip_name("  ..隐藏..  "), "隐藏");
+        assert_eq!(sanitize_zip_name("   "), "漫画");
+        assert_eq!(sanitize_zip_name("..."), "漫画");
+        // 超长标题按字符截断，不会把文件系统撑爆
+        assert_eq!(sanitize_zip_name(&"长".repeat(200)).chars().count(), 60);
+    }
+
+    #[test]
+    fn unique_dest_path_never_overwrites() {
+        let dir = temp_dir("export-unique");
+        fs::write(dir.join("a.zip"), b"first").unwrap();
+        // 同名加序号，不动已有文件
+        assert_eq!(unique_dest_path(&dir, "a.zip"), dir.join("a (1).zip"));
+        fs::write(dir.join("a (1).zip"), b"second").unwrap();
+        assert_eq!(unique_dest_path(&dir, "a.zip"), dir.join("a (2).zip"));
+        // 没冲突时原样返回；无扩展名也按同样规则编号
+        assert_eq!(unique_dest_path(&dir, "b.zip"), dir.join("b.zip"));
+        fs::write(dir.join("plain"), b"x").unwrap();
+        assert_eq!(unique_dest_path(&dir, "plain"), dir.join("plain (1)"));
+        // 多段扩展名只在最后一段前插入
+        fs::write(dir.join("c.tar.gz"), b"x").unwrap();
+        assert_eq!(unique_dest_path(&dir, "c.tar.gz"), dir.join("c.tar (1).gz"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_manga_zip_numbers_entries_in_reading_order() {
+        let root = temp_dir("export-zip");
+        let manga_dir = root.join("manga/m1");
+        fs::create_dir_all(manga_dir.join("sub")).unwrap();
+        fs::write(manga_dir.join("cover.png"), b"cover-bytes").unwrap();
+        fs::write(manga_dir.join("sub/003.jpg"), b"three").unwrap();
+        fs::write(manga_dir.join("004.webp"), b"four!").unwrap();
+        // 索引里的阅读顺序：封面 → 子目录 → 最后一页（与名字排序不同）
+        let pages = vec![
+            "cover.png".to_string(),
+            "sub/003.jpg".to_string(),
+            "004.webp".to_string(),
+        ];
+        let dest = root.join("out/book.zip");
+        let mut seen = 0u64;
+        let (written, entries) =
+            build_manga_zip(&manga_dir, &pages, &dest, &mut |n| seen += n).unwrap();
+
+        assert_eq!(entries, 3);
+        // written 累计的是源字节数（进度条的分母同样按源文件大小算）
+        assert_eq!(written, 21);
+        // 每个文件都回调过一次，累加值等于总字节数
+        assert_eq!(seen, written);
+
+        let file = fs::File::open(&dest).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        assert_eq!(archive.len(), 3);
+        // 前导零序号保证任何解压器都按阅读顺序显示，扩展名沿用原文件
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert_eq!(names, vec!["001.png", "002.jpg", "003.webp"]);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn build_manga_zip_skips_missing_pages_and_fails_on_empty() {
+        let root = temp_dir("export-zip-missing");
+        let manga_dir = root.join("manga/m1");
+        fs::create_dir_all(&manga_dir).unwrap();
+        fs::write(manga_dir.join("001.jpg"), b"one").unwrap();
+        let dest = root.join("out/book.zip");
+
+        // 索引有、磁盘无的页跳过，其余照常打包
+        let (_, entries) = build_manga_zip(
+            &manga_dir,
+            &["001.jpg".to_string(), "002-gone.jpg".to_string()],
+            &dest,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(entries, 1);
+
+        // 一页都没有时明确失败，不留一个空 zip 在临时目录里
+        let err = build_manga_zip(&manga_dir, &[], &dest, &mut |_| {}).unwrap_err();
+        assert!(err.contains("没有可导出的图片"), "实际错误: {err}");
 
         fs::remove_dir_all(&root).ok();
     }
