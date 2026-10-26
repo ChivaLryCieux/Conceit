@@ -123,8 +123,11 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 20px 16px;
-  /* 底部让出悬浮胶囊的高度（胶囊约 60px + 悬浮间距 10px + 呼吸空间） */
-  padding: 22px 22px calc(88px + var(--nav-bar-h));
+  /* 底部让出悬浮胶囊的高度（胶囊约 60px + 悬浮间距 10px + 呼吸空间）；
+     顶部让出状态栏：安卓 edge-to-edge 下网格从屏幕最顶开始，第一行封面
+     会被状态栏压住。--status-bar-h 默认取 env()，安卓上由
+     useSystemBarInsets 经原生桥覆写为真实高度（桌面端为 0，行为不变） */
+  padding: calc(22px + var(--status-bar-h)) 22px calc(88px + var(--nav-bar-h));
   align-content: start;
 }
 
@@ -136,8 +139,8 @@
   gap: 10px;
   color: var(--text-dim);
   text-align: center;
-  /* 底部同样让出胶囊，居中内容不会被它压住 */
-  padding: 24px 24px calc(96px + var(--nav-bar-h));
+  /* 底部同样让出胶囊，居中内容不会被它压住；顶部让出状态栏（同 .shelf-grid） */
+  padding: calc(24px + var(--status-bar-h)) 24px calc(96px + var(--nav-bar-h));
 }
 
 .shelf-empty p {

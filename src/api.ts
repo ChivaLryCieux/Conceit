@@ -184,6 +184,13 @@ export async function systemBarInsets(): Promise<{ top: number; bottom: number }
   return invoke("system_bar_insets");
 }
 
+/** 状态栏图标配色（安卓原生桥提供）：light = true 用深色图标（白色主题），
+ *  false 用浅色图标（黑色主题）。状态栏图标深浅只能由原生侧切换，
+ *  Web 侧没有对应的 CSS；桌面端存根报错，调用方静默跳过 */
+export async function setStatusBarStyle(light: boolean): Promise<void> {
+  return invoke("set_status_bar_style", { light });
+}
+
 /** 打开系统图片选择器（安卓可多选），返回缓存中的真实路径；取消返回空列表 */
 export async function pickImages(): Promise<string[]> {
   return invoke<string[]>("pick_images");

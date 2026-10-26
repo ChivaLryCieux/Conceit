@@ -168,7 +168,8 @@ export default function Shelf({
         </div>
       )}
 
-      {/* 功能栏放底部：平板 / 手机上拇指更好够到，顶部也不再被状态栏占掉一块 */}
+      {/* 功能栏放底部：平板 / 手机上拇指更好够到，顶部不放常驻控件；
+          状态栏高度由网格自身的 padding-top 避让（见 shelf.css） */}
       <ShelfHeader
         breadcrumbs={breadcrumbs}
         crumbOver={crumbOver}

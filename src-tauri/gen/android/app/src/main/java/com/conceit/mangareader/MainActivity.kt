@@ -1,5 +1,6 @@
 package com.conceit.mangareader
 
+import android.content.Context
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
@@ -14,8 +15,10 @@ import androidx.core.view.WindowInsetsControllerCompat
  *    （handleBackNavigation = false），不拦截时系统会直接结束
  *    Activity——也就是在阅读器里划边缘返回也会退出应用。这里把「返回」
  *    改判给前端：阅读器→回书架、文件夹→上一层、根目录→退出。
- * 2. **系统栏图标用白色**：界面是深色的，而主题是 DayNight，浅色系统下
- *    系统会给深色图标，压在深色内容上看不清。
+ * 2. **状态栏图标配色跟随界面风格**：白色主题（默认）用深色图标，黑色主题
+ *    用浅色图标。enableEdgeToEdge 默认按 DayNight 主题给一套，与应用内的
+ *    风格选择未必一致；这里以持久化的上次选择作为冷启动初值，之后由前端
+ *    经 ConceitPlugin.setStatusBarStyle 切换。
  *
  * 注意：本文件同时是 gen/android 下同名文件的规范副本，
  * scripts/build-android.mjs 每次构建前会把 src-tauri/android/ 下的 Kotlin
@@ -29,10 +32,14 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
 
-    // 深色界面：状态栏与底部导航栏的图标 / 文字都用浅色。
-    // enableEdgeToEdge 会按 DayNight 主题设置，这里显式压回浅色图标
+    // 状态栏图标深浅跟随界面风格：白色主题 = 深色图标，黑色主题 = 浅色图标。
+    // 初值取上次的选择（前端切风格时经插件写进 SharedPreferences），
+    // 没有记录（首次安装）按默认的白色主题给深色图标——WebView 首帧画出来
+    // 之前系统栏已经在显示，选错会闪一下另一种配色。
+    val uiPrefs = getSharedPreferences(ConceitPlugin.PREFS_NAME, Context.MODE_PRIVATE)
     WindowInsetsControllerCompat(window, window.decorView).apply {
-      isAppearanceLightStatusBars = false
+      isAppearanceLightStatusBars =
+        uiPrefs.getBoolean(ConceitPlugin.KEY_LIGHT_STATUS_BARS, true)
       isAppearanceLightNavigationBars = false
     }
 

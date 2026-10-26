@@ -3,6 +3,7 @@ package com.conceit.mangareader
 import android.app.Activity
 import android.content.ContentResolver
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -14,6 +15,7 @@ import android.util.Log
 import androidx.activity.result.ActivityResult
 import androidx.annotation.RequiresApi
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -32,6 +34,12 @@ import java.io.OutputStream
 @InvokeArg
 internal class PickerArgs {
   var channel: Channel? = null
+}
+
+/** setStatusBarStyle 的参数：状态栏图标是否用深色（浅色背景上） */
+@InvokeArg
+internal class StatusBarArgs {
+  var light: Boolean = true
 }
 
 /**
@@ -272,6 +280,39 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         .put("top", insets.getInsets(WindowInsetsCompat.Type.statusBars()).top)
         .put("bottom", insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom)
     )
+  }
+
+  /** 设置状态栏图标配色：light = 深色图标（白色主题），false = 浅色图标（黑色主题）。
+   *
+   *  状态栏图标的深浅由系统决定，Web 侧没有任何 CSS 能改，只能经
+   *  WindowInsetsControllerCompat 在原生侧切换。前端在应用界面风格时调用
+   *  （见 src/theme.ts 的 applyTheme）。
+   *
+   *  同时把选择记进 SharedPreferences：MainActivity 冷启动时先读它作为初值，
+   *  黑色主题的用户就不必每次打开都先闪一下深色图标（见 MainActivity.onCreate）。 */
+  @Command
+  fun setStatusBarStyle(invoke: Invoke) {
+    val args = try {
+      invoke.parseArgs(StatusBarArgs::class.java)
+    } catch (e: Throwable) {
+      invoke.reject("状态栏参数解析失败")
+      return
+    }
+    activity
+      .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putBoolean(KEY_LIGHT_STATUS_BARS, args.light)
+      .apply()
+    applyLightStatusBars(args.light)
+    invoke.resolve()
+  }
+
+  /** 切换状态栏图标深浅；窗口装饰只能在主线程动，命令线程不确定，包一层 */
+  private fun applyLightStatusBars(light: Boolean) {
+    activity.runOnUiThread {
+      WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+        .isAppearanceLightStatusBars = light
+    }
   }
 
   /** 导出命令的可选参数：待导出的 zip 路径、建议文件名、进度通道 */
@@ -660,5 +701,13 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       .trim()
       .trimStart('.')
     return cleaned.ifEmpty { "unnamed" }
+  }
+
+  companion object {
+    /** 界面状态的持久化文件（MainActivity 冷启动时读同一份，作为系统栏配色初值） */
+    const val PREFS_NAME = "conceit-ui"
+
+    /** 状态栏图标是否用深色：true = 白色主题，false = 黑色主题 */
+    const val KEY_LIGHT_STATUS_BARS = "light_status_bars"
   }
 }

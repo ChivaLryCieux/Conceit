@@ -118,7 +118,7 @@
 
   .shelf-grid {
     gap: 16px 12px;
-    padding: 16px 16px calc(86px + var(--nav-bar-h));
+    padding: calc(16px + var(--status-bar-h)) 16px calc(86px + var(--nav-bar-h));
   }
 }
 
@@ -157,7 +157,7 @@
   .shelf-grid {
     grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
     gap: 14px 10px;
-    padding: 12px 12px calc(84px + var(--nav-bar-h));
+    padding: calc(12px + var(--status-bar-h)) 12px calc(84px + var(--nav-bar-h));
   }
 
   .card-cover-initial {
@@ -285,7 +285,7 @@
   .shelf-grid {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 12px 8px;
-    padding: 10px 10px calc(84px + var(--nav-bar-h));
+    padding: calc(10px + var(--status-bar-h)) 10px calc(84px + var(--nav-bar-h));
   }
 
   .reader-bottombar {

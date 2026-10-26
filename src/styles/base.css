@@ -143,6 +143,8 @@ button {
   place-items: center;
   align-content: center;
   gap: 12px;
+  /* 加载中 / 加载失败页也要让出状态栏：内容居中，短屏上不会压到状态栏下 */
+  padding-top: var(--status-bar-h);
   color: var(--text-dim);
   text-align: center;
 }

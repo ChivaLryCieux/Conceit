@@ -46,6 +46,13 @@ pub async fn system_bar_insets() -> Result<InsetsResponse, String> {
     Err("系统栏高度查询仅在 Android 上可用".to_string())
 }
 
+/// `set_status_bar_style` 的桌面存根：桌面窗口没有系统栏图标配色问题，
+/// 前端按平台分流，正常不会调到这里
+#[tauri::command]
+pub async fn set_status_bar_style(_light: bool) -> Result<(), String> {
+    Err("状态栏配色设置仅在 Android 上可用".to_string())
+}
+
 /// `save_to_downloads` 的桌面存根：桌面端由
 /// [`crate::commands::save_to_download_dir`] 直接写 `download_dir()`，
 /// 走不到这里；留一份同签名实现只为让 `mobile_import::*` 的再导出

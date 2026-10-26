@@ -137,6 +137,25 @@ pub async fn system_bar_insets(
         .await
         .map_err(|e| e.to_string())
 }
+
+/// 设置状态栏图标配色：`light = true` 用深色图标（白色主题），`false` 用浅色
+/// 图标（黑色主题）。前端在应用界面风格时调用（见前端 `src/theme.ts`）；
+/// 原生侧同时把选择持久化，冷启动时 MainActivity 直接读它作为初值。
+#[tauri::command]
+pub async fn set_status_bar_style(
+    handle: State<'_, ImportHandle<Wry>>,
+    light: bool,
+) -> Result<(), String> {
+    let _: serde_json::Value = handle
+        .0
+        .run_mobile_plugin_async(
+            "setStatusBarStyle",
+            serde_json::json!({ "light": light }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
 /// Kotlin `saveToDownloads` 的响应：最终写进下载目录的文件名
 /// （同名时原生侧已自动加上序号）
 #[derive(Deserialize, Default)]

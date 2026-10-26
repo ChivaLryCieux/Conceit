@@ -66,6 +66,7 @@ pub fn run() {
             mobile_import::clear_import_cache,
             mobile_import::exit_app,
             mobile_import::system_bar_insets,
+            mobile_import::set_status_bar_style,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");

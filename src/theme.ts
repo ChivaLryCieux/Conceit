@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { setStatusBarStyle } from "./api";
 
 /** UI 风格：白色（默认） / 黑色 */
 export type Theme = "white" | "black";
@@ -16,6 +17,10 @@ function applyTheme(theme: Theme): void {
   document
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute("content", THEME_COLORS[theme]);
+  // 状态栏图标配色跟随风格：白底用深色图标、黑底用浅色图标（安卓原生能力，
+  // 见 api.ts 的 setStatusBarStyle）。失败不影响主题本身——桌面端没有这条
+  // 命令，静默跳过即可
+  void setStatusBarStyle(theme === "white").catch(() => {});
 }
 
 function loadTheme(): Theme {
