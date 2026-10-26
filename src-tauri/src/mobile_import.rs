@@ -10,6 +10,8 @@
 //! 构建时由 `scripts/build-android.mjs` 同步进 `gen/android`），用系统文档选择器
 //! （SAF）完成「选择 → 复制到应用缓存目录 → 返回真实路径」。之后
 //! `import_sources` 按普通文件夹 / zip 处理即可，书库与源目录保持独立。
+//! 导出方向相反但同一道墙：`save_to_downloads` 把 Rust 打包好的 zip 交给
+//! 原生侧写进公共下载目录（MediaStore / SAF）。
 //!
 //! 命令统一注册在应用的 invoke_handler 里（不占用 `plugin:` 命名空间），
 //! 桌面端由 [stub] 提供同签名的错误返回——前端只在 Android 上调用它们。

@@ -1,13 +1,18 @@
 package com.conceit.mangareader
 
 import android.app.Activity
+import android.content.ContentResolver
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import android.util.Log
 import androidx.activity.result.ActivityResult
+import androidx.annotation.RequiresApi
 import androidx.core.view.WindowInsetsCompat
 import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
@@ -21,6 +26,7 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 
 /** 选择器命令的可选参数：前端传入的进度通道 */
 @InvokeArg
@@ -44,6 +50,10 @@ internal class PickerArgs {
  * 除导入选择外，桌面端没有对应物的原生能力（退出应用、系统栏高度…）
  * 也统一放在这个插件里，由 desktop 存根给出同签名错误返回。
  *
+ * 导出方向同样绕不开这道墙：书库在应用私有目录里，Rust 把漫画打包成 zip
+ * 后，由这里的 saveToDownloads 经 MediaStore（Android 10+）或 SAF
+ * 「创建文档」（更低版本）写进系统的公共下载目录。
+ *
  * 注意：ActivityResult 回调运行在主线程，复制整棵目录树可能很慢，
  * 因此复制放在后台线程做，完成后回到主线程 resolve，避免 ANR。
  */
@@ -53,6 +63,11 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   /** 复制进度节流状态（reportCopy 用；同一时刻只有一个导入任务，简单记录即可） */
   private val reportLock = Any()
   private var reportLast = 0L
+
+  /** 落盘进度节流状态（reportSave 用）：与 reportCopy 分开一把锁，
+   *  导出的「落盘」段与导入的复制互不干扰 */
+  private val saveReportLock = Any()
+  private var saveReportLast = 0L
 
   /** 选择 zip 文件（可多选），复制进缓存目录，返回真实路径列表 */
   @Command
@@ -256,6 +271,179 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       JSObject()
         .put("top", insets.getInsets(WindowInsetsCompat.Type.statusBars()).top)
         .put("bottom", insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom)
+    )
+  }
+
+  /** 导出命令的可选参数：待导出的 zip 路径、建议文件名、进度通道 */
+  @InvokeArg
+  internal class SaveFileArgs {
+    var path: String? = null
+    var fileName: String? = null
+    var channel: Channel? = null
+  }
+
+  /** 把 Rust 侧打包好的 zip 写进系统「下载」目录，返回最终文件名。
+   *
+   * Android 10+ 走 MediaStore.Downloads：不需要任何权限，写完立刻出现在
+   * 系统的下载应用里，是真正的「直接导出到下载目录」；更低版本没有这个
+   * 集合，退回 SAF 的「创建文档」选择器（侧栏里就是「下载」），由用户
+   * 点一下确认保存位置——SAF 也不需要存储权限。 */
+  @Command
+  fun saveToDownloads(invoke: Invoke) {
+    val args = try {
+      invoke.parseArgs(SaveFileArgs::class.java)
+    } catch (e: Throwable) {
+      invoke.reject("导出参数解析失败")
+      return
+    }
+    val src = File(args.path ?: "")
+    val fileName = args.fileName ?: "漫画.zip"
+    if (!src.isFile) {
+      invoke.reject("找不到待导出的文件")
+      return
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      saveViaMediaStore(invoke, src, fileName, args.channel)
+    } else {
+      startCreateDocument(invoke, src, fileName)
+    }
+  }
+
+  /** MediaStore 直写下载目录（API 29+）。IS_PENDING 先置 1，复制完成再归零，
+   *  半截文件不会暴露给其他应用；中途失败把这条记录删掉，不留垃圾。 */
+  @RequiresApi(Build.VERSION_CODES.Q)
+  private fun saveViaMediaStore(invoke: Invoke, src: File, fileName: String, channel: Channel?) {
+    Thread {
+      try {
+        val resolver = activity.contentResolver
+        val name = uniqueDownloadsName(resolver, fileName)
+        val values = ContentValues().apply {
+          put(MediaStore.Downloads.DISPLAY_NAME, name)
+          put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+          put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+          ?: throw IllegalStateException("无法在下载目录创建文件")
+        try {
+          resolver.openOutputStream(uri)?.use { out ->
+            copyFileWithProgress(src, out, channel)
+          } ?: throw IllegalStateException("无法写入下载目录")
+          val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+          resolver.update(uri, done, null, null)
+          resolveOnUi(invoke) { JSObject().put("name", name) }
+        } catch (e: Throwable) {
+          runCatching { resolver.delete(uri, null, null) }
+          throw e
+        }
+      } catch (e: Throwable) {
+        rejectOnUi(invoke, e.message ?: "写入下载目录失败")
+      }
+    }.start()
+  }
+
+  /** 下载目录里已有同名文件时加 " (n)"，与桌面端 unique_dest_path 同一规则：
+   *  导出是读者自己的资产，不覆盖上一次的结果。 */
+  @RequiresApi(Build.VERSION_CODES.Q)
+  private fun uniqueDownloadsName(resolver: ContentResolver, fileName: String): String {
+    fun exists(name: String): Boolean {
+      val cursor = resolver.query(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        arrayOf(MediaStore.Downloads._ID),
+        "${MediaStore.Downloads.DISPLAY_NAME} = ?",
+        arrayOf(name),
+        null
+      )
+      cursor?.use { return it.moveToFirst() }
+      return false
+    }
+    if (!exists(fileName)) return fileName
+    val stem = fileName.substringBeforeLast('.', fileName)
+    val ext = fileName.substringAfterLast('.', "")
+    for (n in 1..999) {
+      val candidate = if (ext.isEmpty()) "$stem ($n)" else "$stem ($n).$ext"
+      if (!exists(candidate)) return candidate
+    }
+    val stamp = System.currentTimeMillis()
+    return if (ext.isEmpty()) "$stem ($stamp)" else "$stem ($stamp).$ext"
+  }
+
+  /** Android 9 及以下的兜底：SAF 的「创建文档」选择器，默认建议文件名 */
+  private fun startCreateDocument(invoke: Invoke, src: File, fileName: String) {
+    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+      addCategory(Intent.CATEGORY_OPENABLE)
+      type = "application/zip"
+      putExtra(Intent.EXTRA_TITLE, fileName)
+    }
+    startActivityForResult(invoke, intent, "createDocumentResult")
+  }
+
+  @ActivityCallback
+  fun createDocumentResult(invoke: Invoke, result: ActivityResult) {
+    if (result.resultCode != Activity.RESULT_OK) {
+      invoke.reject("已取消导出")
+      return
+    }
+    val uri = result.data?.data
+    if (uri == null) {
+      invoke.reject("没有选择保存位置")
+      return
+    }
+    val args = try {
+      invoke.parseArgs(SaveFileArgs::class.java)
+    } catch (e: Throwable) {
+      invoke.reject("导出参数解析失败")
+      return
+    }
+    val src = File(args.path ?: "")
+    val channel = args.channel
+    Thread {
+      try {
+        if (!src.isFile) throw IllegalStateException("找不到待导出的文件")
+        val name = sanitizeName(queryDisplayName(uri) ?: args.fileName ?: "漫画.zip")
+        activity.contentResolver.openOutputStream(uri)?.use { out ->
+          copyFileWithProgress(src, out, channel)
+        } ?: throw IllegalStateException("无法写入所选位置")
+        resolveOnUi(invoke) { JSObject().put("name", name) }
+      } catch (e: Throwable) {
+        rejectOnUi(invoke, e.message ?: "写入所选位置失败")
+      }
+    }.start()
+  }
+
+  /** 把文件复制进输出流，按 8KB 块回调进度（节流在 reportSave 里做）。
+   *  与 copyUriToFile 同样不用 InputStream.copyTo：单个大 zip 会让进度条
+   *  长时间停在 0 再一步跳到 100%。 */
+  private fun copyFileWithProgress(src: File, out: OutputStream, channel: Channel?) {
+    val buffer = ByteArray(64 * 1024)
+    var done = 0L
+    val total = src.length()
+    src.inputStream().use { input ->
+      out.use { output ->
+        while (true) {
+          val read = input.read(buffer)
+          if (read < 0) break
+          output.write(buffer, 0, read)
+          done += read
+          reportSave(channel, done, total)
+        }
+      }
+    }
+  }
+
+  /** 落盘进度上报：约 10 次/秒，字段与 Rust 侧 ExportProgress 一致。
+   *  与 reportCopy 分开一把锁：导出的「落盘」段与导入的复制互不干扰。 */
+  private fun reportSave(channel: Channel?, doneBytes: Long, totalBytes: Long) {
+    if (channel == null) return
+    val now = System.currentTimeMillis()
+    synchronized(saveReportLock) {
+      if (now - saveReportLast < 100) return
+      saveReportLast = now
+    }
+    channel.send(
+      JSObject()
+        .put("phase", "save")
+        .put("doneBytes", doneBytes)
+        .put("totalBytes", totalBytes)
     )
   }
 

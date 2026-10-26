@@ -45,3 +45,17 @@ pub async fn exit_app() -> Result<(), String> {
 pub async fn system_bar_insets() -> Result<InsetsResponse, String> {
     Err("系统栏高度查询仅在 Android 上可用".to_string())
 }
+
+/// `save_to_downloads` 的桌面存根：桌面端由
+/// [`crate::commands::save_to_download_dir`] 直接写 `download_dir()`，
+/// 走不到这里；留一份同签名实现只为让 `mobile_import::*` 的再导出
+/// 在两个平台上形状一致。
+#[allow(dead_code)]
+pub async fn save_to_downloads(
+    _app: &tauri::AppHandle,
+    _zip_path: &std::path::Path,
+    _file_name: &str,
+    _channel: &tauri::ipc::Channel,
+) -> Result<String, String> {
+    Err("写入下载目录的原生桥仅在 Android 上可用".to_string())
+}

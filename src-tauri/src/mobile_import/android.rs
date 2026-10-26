@@ -137,3 +137,40 @@ pub async fn system_bar_insets(
         .await
         .map_err(|e| e.to_string())
 }
+/// Kotlin `saveToDownloads` 的响应：最终写进下载目录的文件名
+/// （同名时原生侧已自动加上序号）
+#[derive(Deserialize, Default)]
+struct SaveFileResponse {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// 把打包好的 zip 交给 Kotlin 侧写进系统「下载」目录，返回最终文件名。
+///
+/// 与导入桥共用同一个 Kotlin 插件（`conceit-android`）：导出同样绕不开
+/// 「应用私有目录 → 公共目录」这道墙，MediaStore / SAF 都只在原生侧有。
+/// `channel` 由原生侧复制字节时回报进度（字段见 `commands::ExportProgress`）。
+pub async fn save_to_downloads(
+    app: &tauri::AppHandle<Wry>,
+    zip_path: &std::path::Path,
+    file_name: &str,
+    channel: &tauri::ipc::Channel,
+) -> Result<String, String> {
+    let handle = app
+        .try_state::<ImportHandle<Wry>>()
+        .ok_or_else(|| "安卓原生桥不可用（导出功能无法使用）".to_string())?;
+    let res: SaveFileResponse = handle
+        .0
+        .run_mobile_plugin_async(
+            "saveToDownloads",
+            serde_json::json!({
+                "path": zip_path,
+                "fileName": file_name,
+                "channel": channel,
+            }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(res.name.unwrap_or_else(|| file_name.to_string()))
+}
+
