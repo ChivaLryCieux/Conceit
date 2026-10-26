@@ -856,7 +856,9 @@ pub fn copy_images_into_manga(
     Ok(added)
 }
 
-/// 在 dir 下为 desired 生成不冲突的文件名（重名时在扩展名前加 " (n)"）
+/// 在 dir 下为 desired 生成不冲突的文件名（重名时在扩展名前加 " (n)"）。
+/// desired 可以是带子目录的相对路径（zip 解压走这条），序号只加在最后一段
+/// 名字上，前面的目录结构原样保留。
 fn unique_file_name(dir: &Path, desired: &str) -> String {
     if !dir.join(desired).exists() {
         return desired.to_string();
@@ -1456,7 +1458,12 @@ fn extract_zip_inner(src: &Path, dst: &Path, on_progress: &mut dyn FnMut(u64)) -
         if rel.as_os_str().is_empty() {
             continue;
         }
-        let out_path = dst.join(rel);
+        // 同一压缩包里「归一后重名」的条目（001.jpg 与 ./001.jpg、a/../001.jpg，
+        // 或打包工具重复写入的同一路径）不能静默覆盖：File::create 会截断，
+        // 先写的那张照片会无声无息消失。与「添加图片」同一规则——加序号，
+        // 两张都留下（pages 记相对路径，不同名才不会互相顶掉）
+        let rel = unique_file_name(dst, &rel.to_string_lossy().replace('\\', "/"));
+        let out_path = dst.join(&rel);
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建解压目录失败: {e}"))?;
         }
@@ -1936,6 +1943,46 @@ mod tests {
         fs::write(root.join("bad.zip"), b"PK\x03\x04 nope").unwrap();
         assert_eq!(zip_total_bytes(&root.join("bad.zip")), 0);
         assert_eq!(zip_total_bytes(&root.join("missing.zip")), 0);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn extract_zip_renames_colliding_entries_instead_of_overwriting() {
+        use std::io::Write;
+        let root = temp_dir("zip-dup");
+        let src = root.join("dup.zip");
+        // 归一后撞上同一路径的条目：001.jpg 与 ./001.jpg（enclosed_name 都把
+        // ./ 归一掉），内容不同；外加两个子目录里的同名文件（本就不冲突）
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let opts: zip::write::FileOptions<()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            w.start_file("001.jpg", opts).unwrap();
+            w.write_all(b"FIRST").unwrap();
+            w.start_file("./001.jpg", opts).unwrap();
+            w.write_all(b"SECOND").unwrap();
+            w.start_file("a/001.jpg", opts).unwrap();
+            w.write_all(b"SUB-A").unwrap();
+            w.start_file("b/001.jpg", opts).unwrap();
+            w.write_all(b"SUB-B").unwrap();
+            w.finish().unwrap();
+        }
+        fs::write(&src, &buf).unwrap();
+
+        let out = root.join("out");
+        extract_zip(&src, &out, &mut |_| {}).unwrap();
+
+        // 两张不同的照片都要留下：先写的保持原名，撞名的加序号
+        assert_eq!(fs::read(out.join("001.jpg")).unwrap(), b"FIRST");
+        assert_eq!(fs::read(out.join("001 (1).jpg")).unwrap(), b"SECOND");
+        assert_eq!(fs::read(out.join("a/001.jpg")).unwrap(), b"SUB-A");
+        assert_eq!(fs::read(out.join("b/001.jpg")).unwrap(), b"SUB-B");
+        assert_eq!(
+            scan_images(&out),
+            vec!["001 (1).jpg", "001.jpg", "a/001.jpg", "b/001.jpg"]
+        );
 
         fs::remove_dir_all(&root).ok();
     }

@@ -287,6 +287,12 @@ Tauri Channel（`src/api.ts` 的 `ImportProgress`）里按字节上报进度：K
 `treeTotalSize` / `querySize`），拿不到时前端进度条自动降级为不确定态动画。
 生成封面缩略图单独一个阶段，让进度条在解码大图期间也有话说。
 
+**同名不覆盖**：导入与「添加图片」是同一条规则——目标目录里已有同名文件时，在
+扩展名前加 `" (n)"` 序号（Rust 的 `unique_file_name`；安卓还在 SAF 缓存里就先用
+`uniqueFile` 加过一次序号），绝不静默覆盖。zip 解压也一样：`enclosed_name` 会把
+`./001.jpg`、`a/../001.jpg` 归一成 `001.jpg`，打包工具抽风产生的重复条目因此
+两张都能留下（阅读顺序里会多一张 `001 (1).jpg`，不想要在设置里删掉即可）。
+
 > Kotlin 源码的规范副本在 `src-tauri/android/`，`scripts/build-android.mjs` 每次构建前
 > 会把它同步进 `gen/android/app/src/main/java/com/conceit/mangareader/`
 > （`tauri android init` 重建 gen/android 后无需手动拷贝）。仓库里同时保留了工作副本，
