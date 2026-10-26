@@ -58,6 +58,7 @@ pub fn run() {
             commands::add_manga_pages,
             commands::delete_manga_pages,
             commands::reorder_manga_pages,
+            commands::export_manga,
             commands::app_platform,
             mobile_import::pick_directory,
             mobile_import::pick_zip_files,

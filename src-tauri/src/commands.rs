@@ -2,10 +2,11 @@
 
 use crate::db;
 use crate::library::{
-    build_health_report, copy_dir_all, copy_images_into_manga, delete_manga_files,
-    dir_total_bytes, extract_zip, make_cover_thumb, now_unix, remove_cover_thumb, same_page_set,
-    scan_images, title_from_path, zip_total_bytes, HealthReport, Item, ItemKind, LibraryIndex,
-    MangaMeta, INDEX_FILE_NAME, MANGA_DIR_NAME,
+    build_health_report, build_manga_zip, copy_dir_all, copy_images_into_manga,
+    delete_manga_files, dir_total_bytes, extract_zip, make_cover_thumb, now_unix,
+    remove_cover_thumb, same_page_set, scan_images, sanitize_zip_name, title_from_path,
+    unique_dest_path, zip_total_bytes, HealthReport, Item, ItemKind, LibraryIndex, MangaMeta,
+    INDEX_FILE_NAME, MANGA_DIR_NAME,
 };
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -903,6 +904,151 @@ pub fn reorder_manga_pages(
         .ok_or_else(|| "条目不存在".to_string())
 }
 
+/// 导出进度：经 Channel 推给前端。字段名与 Kotlin 侧约定一致，
+/// 前端另有一套解析（导出只有「打包」与「落盘」两个阶段）。
+#[derive(Serialize, Clone)]
+pub struct ExportProgress {
+    /// 阶段：zip = 打包，save = 写进下载目录（安卓 MediaStore / SAF 复制）
+    pub phase: &'static str,
+    /// 已处理的字节数
+    pub done_bytes: u64,
+    /// 预计总字节数；0 = 未知（前端走不确定态）
+    pub total_bytes: u64,
+}
+
+/// 把 zip 落进目标目录：同名自动加 " (n)"（不覆盖上一次的导出），
+/// 优先 rename（同卷是瞬间完成的元数据操作），跨卷时退回复制再删源。
+/// 与 AppHandle 解耦，便于单测。
+#[cfg(not(target_os = "android"))]
+fn save_into_dir(dir: &Path, zip_path: &Path, file_name: &str) -> Result<String, String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|e| format!("创建下载目录失败 {}: {e}", dir.display()))?;
+    let dest = unique_dest_path(dir, file_name);
+    if std::fs::rename(zip_path, &dest).is_err() {
+        std::fs::copy(zip_path, &dest)
+            .map_err(|e| format!("复制到下载目录失败 {}: {e}", dest.display()))?;
+        std::fs::remove_file(zip_path).ok();
+    }
+    Ok(dest.to_string_lossy().to_string())
+}
+
+/// 桌面端：定位系统下载目录（Windows 的「下载」文件夹 / macOS ~/Downloads /
+/// Linux 的 XDG_DOWNLOAD_DIR）后把 zip 挪进去
+#[cfg(not(target_os = "android"))]
+fn save_to_download_dir(
+    app: &tauri::AppHandle,
+    zip_path: &Path,
+    file_name: &str,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("找不到系统的下载目录: {e}"))?;
+    save_into_dir(&dir, zip_path, file_name)
+}
+
+/// 把一部漫画导出成 zip，落到系统的「下载」目录，返回最终文件路径。
+///
+/// 桌面端直接把 zip 挪进 `download_dir()`；安卓上书库位于应用私有目录，
+/// 前端既读不到也写不出去，由内置 Kotlin 插件经 MediaStore（Android 10+，
+/// 无需任何权限）或 SAF「创建文档」选择器（更低版本）写进公共下载目录，
+/// 见 [`crate::mobile_import::save_to_downloads`]。
+///
+/// 持锁分两段（与 import_sources 同一模式）：先短锁取出这部漫画的标题 /
+/// 目录 / 页表，打包与拷贝全程不持锁——大漫画可能几分钟，期间用户仍能
+/// 翻书架、读别的漫画。
+#[tauri::command]
+pub async fn export_manga(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<AppState>>,
+    id: String,
+    channel: Channel,
+) -> Result<String, String> {
+    let (title, manga_dir, pages) = {
+        let st = lock(&state)?;
+        let item = st
+            .index
+            .item(&id)
+            .ok_or_else(|| "条目不存在".to_string())?;
+        if item.kind != ItemKind::Manga {
+            return Err("文件夹不能导出".to_string());
+        }
+        let meta = item
+            .manga
+            .as_ref()
+            .ok_or_else(|| "这部漫画还没有图片".to_string())?;
+        if meta.pages.is_empty() {
+            return Err("这部漫画还没有图片，无可导出".to_string());
+        }
+        (item.title.clone(), st.root.join(&meta.dir), meta.pages.clone())
+    };
+
+    // 进度分母：只 stat 不解码，几百个页也是毫秒级
+    let total_bytes: u64 = pages
+        .iter()
+        .map(|p| {
+            std::fs::metadata(manga_dir.join(p))
+                .map(|m| m.len())
+                .unwrap_or(0)
+        })
+        .sum();
+    let send = |phase: &'static str, done: u64| {
+        let _ = channel.send(InvokeResponseBody::Json(
+            serde_json::to_string(&ExportProgress {
+                phase,
+                done_bytes: done,
+                total_bytes,
+            })
+            .unwrap_or_default(),
+        ));
+    };
+
+    // 先打包进临时目录：安卓上随后由原生桥搬去下载目录，桌面端多是同卷 rename。
+    // 目录名带纳秒时间戳——同一秒内连点两次导出也不会撞到同一个 zip 上
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let staging = std::env::temp_dir().join(format!("conceit-export-{stamp}"));
+    let file_name = format!("{}.zip", sanitize_zip_name(&title));
+    let zip_path = staging.join(&file_name);
+    let mut done_bytes = 0u64;
+    let mut last_sent = Instant::now();
+    let built = build_manga_zip(&manga_dir, &pages, &zip_path, &mut |n| {
+        done_bytes += n;
+        if last_sent.elapsed() >= Duration::from_millis(100) {
+            last_sent = Instant::now();
+            send("zip", done_bytes);
+        }
+    });
+    // 收尾一定报一次 100%，节流可能把最后一次跳过了
+    if built.is_ok() {
+        send("zip", total_bytes.max(done_bytes));
+    }
+    let entries = match built {
+        Ok((_, entries)) => entries,
+        Err(e) => {
+            std::fs::remove_dir_all(&staging).ok();
+            return Err(e);
+        }
+    };
+
+    let dest = {
+        #[cfg(target_os = "android")]
+        let result =
+            crate::mobile_import::save_to_downloads(&app, &zip_path, &file_name, &channel).await;
+        #[cfg(not(target_os = "android"))]
+        let result = save_to_download_dir(&app, &zip_path, &file_name);
+        result
+    };
+    // 临时目录无论成败都清掉：安卓上 Kotlin 侧已把内容复制走
+    std::fs::remove_dir_all(&staging).ok();
+    let dest = dest?;
+    eprintln!("[export] 《{title}》{entries} 页 -> {dest}");
+    Ok(dest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -944,6 +1090,96 @@ mod tests {
         assert_eq!(progress(&state), Some(1.0));
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// 桌面端落盘：zip 挪进目标目录（源消失），同名时加序号、不动旧文件
+    #[test]
+    #[cfg(not(target_os = "android"))]
+    fn save_into_dir_moves_zip_and_never_overwrites() {
+        let dir = temp_root("export-dest");
+        let staging = temp_root("export-stage");
+        let zip = staging.join("book.zip");
+        std::fs::write(&zip, b"first").unwrap();
+
+        let dest = save_into_dir(&dir, &zip, "book.zip").unwrap();
+        assert_eq!(dest, dir.join("book.zip").to_string_lossy().to_string());
+        // rename 走后源文件消失，内容原样落在目标目录
+        assert!(!zip.exists());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"first");
+
+        // 再导一次同名：写成 book (1).zip，第一次的结果不被覆盖
+        std::fs::write(&zip, b"second").unwrap();
+        let dest2 = save_into_dir(&dir, &zip, "book.zip").unwrap();
+        assert_eq!(dest2, dir.join("book (1).zip").to_string_lossy().to_string());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"first");
+        assert_eq!(std::fs::read(&dest2).unwrap(), b"second");
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&staging).ok();
+    }
+
+    /// 导出全链路（除平台落盘）：真书库里建一部标题带非法字符的漫画，
+    /// 按 export_manga 的同样步骤取信息 → 打包 → 落盘，再解开 zip 校验
+    /// 条目名与顺序。这条测试守住「序号条目名 + 阅读顺序」这个契约。
+    #[test]
+    #[cfg(not(target_os = "android"))]
+    fn export_pipeline_numbers_entries_in_reading_order() {
+        let root = temp_root("export-e2e");
+        let mut state = AppState::new(root.clone()).unwrap();
+        let item = state.index.insert_empty_manga("导出/测试:第一卷", None);
+        let dir = root.join(MANGA_DIR_NAME).join(&item.id);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 故意让磁盘上的文件名顺序与阅读顺序不一致：后两页倒着写
+        for name in ["c.png", "a.png", "b.png"] {
+            std::fs::write(dir.join(name), vec![b'x'; 8]).unwrap();
+        }
+        {
+            let meta = state
+                .index
+                .item_mut(&item.id)
+                .unwrap()
+                .manga
+                .as_mut()
+                .unwrap();
+            meta.pages = vec!["a.png".into(), "b.png".into(), "c.png".into()];
+            meta.cover = Some("a.png".into());
+        }
+        state.save().unwrap();
+
+        // —— 以下与 export_manga 的内部步骤一一对应 ——
+        let (title, manga_dir, pages) = {
+            let found = state.index.item(&item.id).unwrap();
+            let meta = found.manga.as_ref().unwrap();
+            (found.title.clone(), root.join(&meta.dir), meta.pages.clone())
+        };
+        assert_eq!(pages, vec!["a.png", "b.png", "c.png"]);
+        let staging = temp_root("export-e2e-stage");
+        let file_name = format!("{}.zip", sanitize_zip_name(&title));
+        // 标题里的 "/" 与 ":" 都被换成下划线
+        assert_eq!(file_name, "导出_测试_第一卷.zip");
+        let zip_path = staging.join(&file_name);
+        let (written, entries) =
+            build_manga_zip(&manga_dir, &pages, &zip_path, &mut |_| {}).unwrap();
+        assert_eq!(entries, 3);
+        assert_eq!(written, 24);
+
+        let dest_dir = temp_root("export-e2e-dest");
+        let dest = save_into_dir(&dest_dir, &zip_path, &file_name).unwrap();
+        assert!(!zip_path.exists()); // 已挪走
+
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+        assert_eq!(archive.len(), 3);
+        for i in 0..3usize {
+            let mut page = archive.by_index(i).unwrap();
+            let expected = format!("{:03}.png", i + 1);
+            assert_eq!(page.name(), expected.as_str());
+            // 序号严格按阅读顺序：001 = a.png、002 = b.png、003 = c.png
+            assert_eq!(page.size(), 8);
+        }
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&staging).ok();
+        std::fs::remove_dir_all(&dest_dir).ok();
     }
 
     /// 全新书库：启动即建库，快照与写入都不依赖旧 index.json
