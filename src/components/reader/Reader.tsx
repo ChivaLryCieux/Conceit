@@ -209,12 +209,6 @@ export default function Reader({ item, onExit, onToast }: Props) {
           </div>
         )}
       </div>
-
-      {chromeVisible && pages.length > 0 && (
-        <div className="reader-hint glass">
-          点击画面显隐工具栏 · 缩放按钮 / Ctrl+滚轮 · 滚轮 / 方向键翻页 · Esc 退出
-        </div>
-      )}
     </div>
   );
 }

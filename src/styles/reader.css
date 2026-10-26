@@ -156,24 +156,3 @@
   color: var(--text-dim);
   font-size: 14px;
 }
-
-/* 提示条放顶部：底部已被工具栏占据（两者随 chromeVisible 同时显隐） */
-.reader-hint {
-  position: fixed;
-  left: 50%;
-  top: calc(18px + var(--status-bar-h));
-  transform: translateX(-50%);
-  color: var(--text-dim);
-  font-size: 12px;
-  padding: 7px 14px;
-  border-radius: 999px;
-  box-shadow: var(--shadow-2);
-  z-index: 3;
-  transition: opacity 0.2s ease;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-.reader-hint.chrome-hidden {
-  opacity: 0;
-}

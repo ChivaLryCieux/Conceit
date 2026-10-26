@@ -320,8 +320,7 @@ button {
   .btn,
   .crumb,
   .page-thumb,
-  .reader-bottombar,
-  .reader-hint {
+  .reader-bottombar {
     transition-duration: 0.01ms;
   }
 }
