@@ -207,6 +207,29 @@ export async function reorderMangaPages(id: string, pages: string[]): Promise<It
   return invoke<Item>("reorder_manga_pages", { id, pages });
 }
 
+/* ---------- 导出漫画 ---------- */
+
+/** 导出进度：Rust 打包阶段与安卓原生桥落盘阶段经同一 Channel 回传，
+ *  字段一致（安卓侧由 Kotlin 按同样形状 send） */
+export interface ExportProgress {
+  /** 阶段：zip = 打包成 zip，save = 写进下载目录（安卓 MediaStore / SAF 复制） */
+  phase: "zip" | "save";
+  /** 已处理的字节数 */
+  doneBytes: number;
+  /** 预计总字节数；0 = 未知（进度条走不确定态） */
+  totalBytes: number;
+}
+
+/** 把一部漫画导出成 zip 落到系统「下载」目录，返回最终文件路径。
+ *  桌面端直接写 download_dir()；安卓上由原生桥写进公共下载目录
+ *  （Android 10+ 用 MediaStore，无需权限；更低版本弹出 SAF 保存选择器） */
+export async function exportManga(
+  id: string,
+  channel: Channel<ExportProgress>
+): Promise<string> {
+  return invoke<string>("export_manga", { id, channel });
+}
+
 /** 某个容器（root 或文件夹）下按排序排列的条目。
  *  顺序与兜底规则由 Rust LibraryIndex::children 单一来源计算，随快照
  *  下发（snapshot.children）；这里只做 id -> 条目的查表。 */

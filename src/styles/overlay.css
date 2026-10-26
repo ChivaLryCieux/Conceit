@@ -287,6 +287,24 @@
   align-self: flex-start;
 }
 
+/* ---------- 设置弹窗内的导出进度条 ---------- */
+
+/* 复用忙碌遮罩的进度条样式，只是改成撑满弹窗宽度 */
+.settings-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-progress .busy-progress {
+  width: 100%;
+}
+
+.settings-progress .busy-progress-text {
+  text-align: left;
+  max-width: 100%;
+}
+
 /* ---------- 封面选择器 ---------- */
 
 .page-picker {

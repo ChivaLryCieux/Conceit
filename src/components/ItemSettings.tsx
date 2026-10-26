@@ -5,11 +5,14 @@ import {
   addMangaPages,
   clearImportCache,
   deleteMangaPages,
+  exportManga,
   isAndroid,
   pickImages,
   reorderMangaPages,
   updateItemSettings,
+  type ExportProgress,
 } from "../api";
+import { Channel } from "@tauri-apps/api/core";
 import { usePageSorting } from "../usePageSorting";
 import type { Item } from "../types";
 
@@ -41,6 +44,11 @@ export default function ItemSettings({
   /** 标记待删除的页面（点 ✕ 标记，统一确认后删除，防误触） */
   const [pendingDelete, setPendingDelete] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  /** 导出进度（ratio 为 null = 总量未知，走不确定态）；null 表示没在导出 */
+  const [exporting, setExporting] = useState<{
+    ratio: number | null;
+    label: string;
+  } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   const isManga = item.kind === "manga";
@@ -153,6 +161,42 @@ export default function ItemSettings({
     }
   }
 
+  /** 有任一异步操作在跑（增删页 / 保存 / 导出）时禁用其他按钮，
+   *  避免两个命令同时改同一部漫画 */
+  const working = busy || exporting !== null;
+
+  /** 导出成 zip 落到系统下载目录：进度经 Channel 回报，弹窗内显示进度条。
+   *  桌面端直接写 download_dir()；安卓上由原生桥写进公共下载目录
+   *  （Android 10+ 走 MediaStore，无需权限；更低版本弹 SAF 保存选择器）。 */
+  async function exportZip() {
+    if (pages.length === 0) return;
+    setExporting({ ratio: null, label: "正在准备…" });
+    const channel = new Channel<ExportProgress>((msg) => {
+      const ratio =
+        msg.totalBytes > 0
+          ? Math.min(1, Math.max(0, msg.doneBytes / msg.totalBytes))
+          : null;
+      const pct = ratio === null ? "" : ` ${Math.round(ratio * 100)}%`;
+      setExporting({
+        ratio,
+        label:
+          msg.phase === "save"
+            ? `正在保存到下载目录…${pct}`
+            : `正在打包…${pct}`,
+      });
+    });
+    try {
+      const dest = await exportManga(item.id, channel);
+      onToast(`已导出到 ${dest}`, "success");
+    } catch (e) {
+      // 安卓 9 及以下走 SAF 选择器，用户按返回键取消不是出错
+      const cancelled = String(e) === "已取消导出";
+      onToast(cancelled ? "已取消导出" : `导出失败：${e}`, cancelled ? "info" : "error");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   function togglePending(page: string) {
     setPendingDelete((prev) => {
       const next = new Set(prev);
@@ -162,10 +206,9 @@ export default function ItemSettings({
     });
   }
 
-  /** 危险操作区：删除入口。漫画连同书库中的本地文件一并删除
-   *  （Rust 侧 delete_items 已递归处理目录与缩略图），文件夹递归
-   *  删除其中内容；二次确认在 Shelf 的 ConfirmDialog 中完成。
-   *  漫画设置里放在封面选择（缩略图网格）上方，见下面 isManga 分支。 */
+  /** 危险操作区：只有一个删除入口，文案刻意保持最短——「删掉什么、后果多严重」
+   *  由随后的二次确认框（Shelf 的 ConfirmDialog）讲清楚，这里不再重复解释。
+   *  放在弹窗最底部：读者滚到这儿已有心理准备，也不会在缩略图网格里误触。 */
   const dangerZone = (
     <div className="settings-danger">
       <button
@@ -173,33 +216,35 @@ export default function ItemSettings({
         className="btn btn-danger"
         onClick={() => onDelete(item)}
       >
-        {isManga ? "删除漫画（连同本地文件）" : "删除文件夹"}
+        {isManga ? "删除漫画" : "删除文件夹"}
       </button>
-      <p className="settings-hint">
-        {isManga
-          ? "删除后书库中该漫画复制进来的图片文件将一并移除，无法恢复。"
-          : "删除后文件夹及其中所有条目将一并移除，无法恢复。"}
-      </p>
     </div>
   );
+
+  /** 导出进行中不关弹窗：进度 Channel 还连着，中途关掉用户既看不到结果，
+   *  也不知道该不该重来。导出本身是有界的（打包 + 复制），不会卡住。 */
+  function requestClose() {
+    if (exporting) return;
+    onClose();
+  }
 
   return (
     <Modal
       title={`设置 · ${item.title}`}
-      onClose={onClose}
+      onClose={requestClose}
       wide={isManga && pages.length > 0}
       footer={
         <>
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={requestClose}>
             取消
           </button>
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy || !title.trim()}
+            disabled={working || !title.trim()}
             onClick={() => void save()}
           >
-            {busy ? "处理中…" : "保存"}
+            {working ? "处理中…" : "保存"}
           </button>
         </>
       }
@@ -230,10 +275,6 @@ export default function ItemSettings({
             </span>
           </label>
 
-          {/* 删除入口置于封面选择上方：网格里全是点选封面 / 拖动排序的
-              手势，危险键放上面既不怕误触，也不用滚过整片网格才够得着 */}
-          {dangerZone}
-
           <div className="pages-section">
             <div className="pages-section-head">
               <span className="settings-hint">
@@ -252,7 +293,7 @@ export default function ItemSettings({
                     <button
                       type="button"
                       className="btn btn-danger"
-                      disabled={busy}
+                      disabled={working}
                       onClick={() => void removePending()}
                     >
                       删除所选 {pendingDelete.size} 页
@@ -262,13 +303,40 @@ export default function ItemSettings({
                 <button
                   type="button"
                   className="btn"
-                  disabled={busy}
+                  disabled={working}
                   onClick={() => void addImages()}
                 >
                   ＋ 添加图片
                 </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={working || pages.length === 0}
+                  title="把这部漫画按当前顺序打包成 zip，保存到系统的下载目录"
+                  onClick={() => void exportZip()}
+                >
+                  导出
+                </button>
               </div>
             </div>
+
+            {exporting && (
+              <div className="settings-progress">
+                <div className="busy-progress">
+                  <div
+                    className={`busy-progress-bar${
+                      exporting.ratio === null ? " busy-progress-bar--indeterminate" : ""
+                    }`}
+                    style={
+                      exporting.ratio === null
+                        ? undefined
+                        : { width: `${Math.round(exporting.ratio * 100)}%` }
+                    }
+                  />
+                </div>
+                <div className="busy-progress-text">{exporting.label}</div>
+              </div>
+            )}
 
             {pages.length > 0 ? (
               <div
@@ -342,6 +410,8 @@ export default function ItemSettings({
               </p>
             )}
           </div>
+
+          {dangerZone}
         </>
       ) : (
         <>
