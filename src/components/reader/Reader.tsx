@@ -4,6 +4,8 @@ import { fetchPages, saveProgress } from "../../api";
 import { useBackHandler } from "../../backHandler";
 import ReaderBottombar from "./ReaderBottombar";
 import { useReaderWindow } from "./useReaderWindow";
+import { useReaderGestures } from "./useReaderGestures";
+import { ZOOM_MAX, ZOOM_MIN, clampZoom, isZoomed } from "./zoom";
 import type { Item, Toast } from "../../types";
 
 interface Props {
@@ -12,16 +14,11 @@ interface Props {
   onToast: (text: string, tone?: Toast["tone"]) => void;
 }
 
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 3;
-
-function clampZoom(z: number): number {
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
-}
-
 /** 阅读器：竖向拼接图片上下滑动；点击画面显隐唯一底部框栏。
  *  图片为窗口化懒加载：只有视口附近的几张挂 <img>，其余用等高占位
- *  撑高度（见 useReaderWindow），数百页的漫画也不会一次性解码全部原图。 */
+ *  撑高度（见 useReaderWindow），数百页的漫画也不会一次性解码全部原图。
+ *  缩放入口有三条：底栏按钮、Ctrl+滚轮（桌面）、双指捏合 + 双击还原
+ *  （触屏，见 useReaderGestures）。 */
 export default function Reader({ item, onExit, onToast }: Props) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,8 +138,17 @@ export default function Reader({ item, onExit, onToast }: Props) {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  const zoomed = zoom > 1.001;
+  const zoomed = isZoomed(zoom);
   const { start, end } = win.range;
+
+  /* ---------- 触屏手势：双指捏合缩放、放大后平移、双击还原 ---------- */
+  const gestures = useReaderGestures({
+    scrollRef,
+    zoom,
+    onZoom: setZoom,
+    onTap: () => setChromeVisible((v) => !v),
+    onReset: () => setZoom(1),
+  });
 
   return (
     <div className="reader" ref={rootRef}>
@@ -166,7 +172,7 @@ export default function Reader({ item, onExit, onToast }: Props) {
         className="reader-scroll"
         ref={scrollRef}
         onScroll={win.onScroll}
-        onClick={() => setChromeVisible((v) => !v)}
+        {...gestures}
       >
         {loading ? (
           <div className="reader-loading">正在加载图片…</div>
@@ -184,13 +190,19 @@ export default function Reader({ item, onExit, onToast }: Props) {
                 <div
                   className="reader-page-slot"
                   key={p}
-                  style={{ height: win.heights[index] || win.estimateAt(index) }}
+                  style={{
+                    height: win.heights[index] || win.estimateAt(index),
+                    // 槽位跟着缩放变宽：图片填满槽位，放大后内容比屏幕宽，
+                    // 横向滚动量（与可平移性）由此而来。槽位若固定 100%
+                    // 且 overflow:hidden，放大的图会被裁掉一半且永远滚不动
+                    width: `${zoom * 100}%`,
+                  }}
                 >
                   <img
                     className="reader-page"
                     src={convertFileSrc(p)}
                     alt={`第 ${index + 1} 页`}
-                    style={{ width: `${zoom * 100}%` }}
+                    style={{ width: "100%" }}
                     draggable={false}
                     onLoad={(e) =>
                       win.measure(index, e.currentTarget.clientHeight)

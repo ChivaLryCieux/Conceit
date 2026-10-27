@@ -104,7 +104,9 @@
   overflow-x: auto;
   cursor: pointer;
   scrollbar-width: thin;
-  /* 触屏：只允许竖向平移（捏合/双击缩放由应用内的 Ctrl+滚轮逻辑接管），
+  /* 触屏：只允许竖向平移——单指竖滑交给浏览器（带动量，手感最好），
+     捏合缩放与放大后的横平移由 useReaderGestures 用 Pointer Events 接；
+     pan-y 同时禁掉浏览器自己的捏合，避免和应用内缩放打架，
      并阻止滚动链传递到外壳造成整页回弹 */
   touch-action: pan-y;
   overscroll-behavior: contain;
@@ -132,7 +134,9 @@
   width: 100%;
 }
 
-/* 每页一个槽位：高度由实测/估计值固定，图片加载完后高度即被实测值接管 */
+/* 每页一个槽位：高度由实测/估计值固定，宽度由内联的缩放比例驱动
+   （放大后槽位与图片一起变宽，横向才有滚动量可平移；图片加载完后
+   高度即被实测值接管）。overflow:hidden 只在高度方向兜底裁剪 */
 .reader-page-slot {
   flex-shrink: 0;
   width: 100%;
@@ -141,6 +145,7 @@
   background: var(--reader-page-bg);
 }
 
+/* 图片填满槽位：槽位宽 = 缩放 × 轨道宽，故这里 100% 即缩放后的宽度 */
 .reader-page {
   display: block;
   height: auto;
