@@ -1,6 +1,8 @@
 package com.conceit.mangareader
 
 import android.app.Activity
+import app.tauri.Logger
+import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 
@@ -48,4 +50,18 @@ internal fun Activity.runBackground(
       rejectOnUi(invoke, e.message ?: failMessage)
     }
   }.start()
+}
+
+/**
+ * 从 invoke 参数里取进度 Channel（前端不传时返回 null，进度条走不确定态）。
+ *
+ * 解析失败只记日志、不 reject：进度是可选增强，为它让整条命令失败不值得
+ * ——与 setStatusBarStyle 解析参数失败即 reject 的策略差异是有意的：
+ * 那边缺了参数命令本身没有意义，这边缺了通道命令照常完成。
+ */
+internal fun parseProgressChannel(invoke: Invoke): Channel? = try {
+  invoke.parseArgs(ProgressArgs::class.java).channel
+} catch (e: Throwable) {
+  Logger.error("解析进度通道失败: ${e.message}")
+  null
 }

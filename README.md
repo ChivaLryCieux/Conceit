@@ -142,8 +142,8 @@ node scripts/build-android.mjs --skip-frontend   # 前端已构建过时
 ```
 
 脚本在调用 Gradle 前会把 `src-tauri/android/*.kt`（应用自有的 Kotlin 源码——
-原生桥 `ConceitPlugin.kt` 与拦截系统返回的 `MainActivity.kt`）同步进
-`gen/android/app/src/main/java/`，
+原生桥 `ConceitPlugin.kt` 及其同包辅助文件、拦截系统返回的 `MainActivity.kt`）
+同步进 `gen/android/app/src/main/java/`，
 因此执行过 `tauri android init` 重建工程后也无需手动拷贝。
 
 Gradle 的原始产物在 `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`，
@@ -258,8 +258,11 @@ src-tauri/                   后端（Rust + Tauri 2）
 │   └── 001_init.sql         items / pages / container_order / meta 四张表
 ├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入 / 漫画图片管理）
 ├── src/mobile_bridge.rs     Android 原生桥（SAF 目录 / zip / 图片选择等，桌面端为存根）
-├── android/ConceitPlugin.kt Android 原生桥的 Kotlin 实现（构建时同步进 gen/android）
+├── android/ConceitPlugin.kt Android 原生桥的 Kotlin 实现：只留命令编排（构建时同步进 gen/android）
 ├── android/MainActivity.kt  主 Activity：拦截系统返回转交前端（构建时同步进 gen/android）
+├── android/*.kt（同包辅助） InvokeExt（后台执行骨架）/ Progress（进度节流）/ SafeName、
+│                            ContentUris、DocumentTree、NameAllocator（SAF 原语，可 JVM 单测）/
+│                            ImportCache（缓存目录名）/ StatusBarPrefs（状态栏偏好契约）
 └── tauri.conf.json          桌面配置（asset 协议加载本地图片）
 ```
 

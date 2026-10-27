@@ -13,7 +13,6 @@ import androidx.annotation.RequiresApi
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlin.math.roundToInt
-import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -26,9 +25,12 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.io.OutputStream
 
-/** 选择器命令的可选参数：前端传入的进度通道 */
+/** 选择器 / 导出命令的可选参数：进度通道；导出另带待写出文件与建议名。
+ *  选择器命令只传 channel，其余字段留空——合成一个类，省得每个命令认领一个。 */
 @InvokeArg
-internal class PickerArgs {
+internal class ProgressArgs {
+  var path: String? = null
+  var fileName: String? = null
   var channel: Channel? = null
 }
 
@@ -48,7 +50,7 @@ internal class StatusBarArgs {
  *    Rust 的 std::fs 无法读取（表现为「路径不存在」）。
  *
  * 这里用系统文档选择器（SAF）完成「选择 → 复制到应用缓存目录 → 返回真实路径」，
- * Rust 侧之后按普通文件夹 / zip 处理（见 src-tauri/src/mobile_import.rs）。
+ * Rust 侧之后按普通文件夹 / zip 处理（见 src-tauri/src/mobile_bridge.rs）。
  * 复制时保留原始名称，导入后的漫画标题仍然是有意义的文件夹名 / 压缩包名。
  *
  * 除导入选择外，桌面端没有对应物的原生能力（退出应用、系统栏高度…）
@@ -94,7 +96,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     } else {
       data?.data?.let { uris.add(it) }
     }
-    val progress = ThrottledProgress(parseChannel(invoke))
+    val progress = ThrottledProgress(parseProgressChannel(invoke))
     // 复制可能很慢：放后台线程，完成后回主线程 resolve
     activity.runBackground(invoke, "读取所选文件失败") {
       val dir = ImportCache.PICKED_IMPORT.prepare(activity, wipe = true)
@@ -213,7 +215,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
           return@runBackground
         }
       }
-      val progress = ThrottledProgress(parseChannel(invoke))
+      val progress = ThrottledProgress(parseProgressChannel(invoke))
       val title = dest.name
       var done = 0L
       var count = 0
@@ -316,14 +318,6 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** 导出命令的可选参数：待导出的 zip 路径、建议文件名、进度通道 */
-  @InvokeArg
-  internal class SaveFileArgs {
-    var path: String? = null
-    var fileName: String? = null
-    var channel: Channel? = null
-  }
-
   /** 把 Rust 侧打包好的 zip 写进系统「下载」目录，返回最终文件名。
    *
    * Android 10+ 走 MediaStore.Downloads：不需要任何权限，写完立刻出现在
@@ -333,7 +327,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun saveToDownloads(invoke: Invoke) {
     val args = try {
-      invoke.parseArgs(SaveFileArgs::class.java)
+      invoke.parseArgs(ProgressArgs::class.java)
     } catch (e: Throwable) {
       invoke.reject("导出参数解析失败")
       return
@@ -417,7 +411,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     val args = try {
-      invoke.parseArgs(SaveFileArgs::class.java)
+      invoke.parseArgs(ProgressArgs::class.java)
     } catch (e: Throwable) {
       invoke.reject("导出参数解析失败")
       return
@@ -463,15 +457,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   // ---------- 内部实现 ----------
 
   private fun pathsResponse(paths: List<String>): JSObject {
-    val items: MutableList<String?> = ArrayList(paths)
-    return JSObject().put("paths", JSArray.from(items.toTypedArray()))
-  }
-
-  /** 从 invoke 参数里取进度 Channel（前端不传时返回 null，进度条走不确定态） */
-  private fun parseChannel(invoke: Invoke): Channel? = try {
-    invoke.parseArgs(PickerArgs::class.java).channel
-  } catch (e: Throwable) {
-    Logger.error("解析进度通道失败: ${e.message}")
-    null
+    val items: Array<String?> = paths.toTypedArray()
+    return JSObject().put("paths", JSArray.from(items))
   }
 }
