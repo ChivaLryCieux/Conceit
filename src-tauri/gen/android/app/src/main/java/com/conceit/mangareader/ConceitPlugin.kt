@@ -1,15 +1,12 @@
 package com.conceit.mangareader
 
 import android.app.Activity
-import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.provider.DocumentsContract
 import android.provider.MediaStore
-import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import android.util.Log
 import androidx.activity.result.ActivityResult
@@ -28,7 +25,6 @@ import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
-import java.io.FileOutputStream
 import java.io.OutputStream
 
 /** 选择器命令的可选参数：前端传入的进度通道 */
@@ -105,10 +101,11 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       val dir = prepareDir("picked-import", wipe = true)
       val paths = ArrayList<String>()
       uris.forEachIndexed { i, uri ->
-        val size = querySize(uri)
-        val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "file-$i"
+        val size = activity.contentResolver.querySize(uri)
+        val name = activity.contentResolver.queryDisplayName(uri)
+          ?: uri.lastPathSegment ?: "file-$i"
         var done = 0L
-        val path = copyUriToFile(uri, dir, ensureZipExtension = true) { n ->
+        val path = activity.contentResolver.copyUriToFile(uri, dir, ensureZipExtension = true) { n ->
           done += n
           progress.send {
             put("phase", "copy")
@@ -156,7 +153,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     activity.runBackground(invoke, "读取所选图片失败") {
       val dir = prepareDir("picked-images", wipe = true)
       val paths = uris.mapNotNull { uri ->
-        copyUriToFile(uri, dir, ensureZipExtension = false)
+        activity.contentResolver.copyUriToFile(uri, dir, ensureZipExtension = false)
       }
       activity.resolveOnUi(invoke) { pathsResponse(paths) }
     }
@@ -192,7 +189,10 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       // 目录名取自所选文件夹的显示名，导入后的漫画标题才有意义
       val cacheRoot = File(activity.cacheDir, "tree-import")
       val cacheExisted = cacheRoot.exists()
-      val dest = File(prepareDir("tree-import", wipe = true), treeDisplayName(treeUri))
+      val dest = File(
+        prepareDir("tree-import", wipe = true),
+        activity.contentResolver.treeDisplayName(treeUri)
+      )
       dest.mkdirs()
       Log.i(
         "ConceitImport",
@@ -201,7 +201,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       // 安卓导入是「SAF 拷进缓存 + Rust 再拷进书库」两份占用，拷到一半
       // 空间不足只会得到一条错误、白等几分钟。先按目录总大小预估，不够
       // 就提前拒绝；提供者不给文件大小时放弃预估、照常导入。
-      val total = treeTotalSize(treeUri)
+      val total = activity.contentResolver.treeTotalSize(treeUri)
       if (total != null) {
         val usable = activity.cacheDir.usableSpace
         val need = total * 2 + 64L * 1024 * 1024
@@ -218,7 +218,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       val title = dest.name
       var done = 0L
       var count = 0
-      copyTree(treeUri, dest) { n ->
+      activity.contentResolver.copyTree(treeUri, dest) { n ->
         done += n
         count += 1
         progress.send {
@@ -368,7 +368,18 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   ) {
     activity.runBackground(invoke, "写入下载目录失败") {
       val resolver = activity.contentResolver
-      val name = uniqueDownloadsName(resolver, fileName)
+      val name = allocateDownloadsName(
+        exists = { candidate ->
+          resolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Downloads._ID),
+            "${MediaStore.Downloads.DISPLAY_NAME} = ?",
+            arrayOf(candidate),
+            null
+          )?.use { it.moveToFirst() } ?: false
+        },
+        fileName = fileName,
+      )
       val values = ContentValues().apply {
         put(MediaStore.Downloads.DISPLAY_NAME, name)
         put(MediaStore.Downloads.MIME_TYPE, "application/zip")
@@ -388,32 +399,6 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         throw e
       }
     }
-  }
-
-  /** 下载目录里已有同名文件时加 " (n)"，与桌面端 unique_dest_path 同一规则：
-   *  导出是读者自己的资产，不覆盖上一次的结果。 */
-  @RequiresApi(Build.VERSION_CODES.Q)
-  private fun uniqueDownloadsName(resolver: ContentResolver, fileName: String): String {
-    fun exists(name: String): Boolean {
-      val cursor = resolver.query(
-        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-        arrayOf(MediaStore.Downloads._ID),
-        "${MediaStore.Downloads.DISPLAY_NAME} = ?",
-        arrayOf(name),
-        null
-      )
-      cursor?.use { return it.moveToFirst() }
-      return false
-    }
-    if (!exists(fileName)) return fileName
-    val stem = fileName.substringBeforeLast('.', fileName)
-    val ext = fileName.substringAfterLast('.', "")
-    for (n in 1..999) {
-      val candidate = if (ext.isEmpty()) "$stem ($n)" else "$stem ($n).$ext"
-      if (!exists(candidate)) return candidate
-    }
-    val stamp = System.currentTimeMillis()
-    return if (ext.isEmpty()) "$stem ($stamp)" else "$stem ($stamp).$ext"
   }
 
   /** Android 9 及以下的兜底：SAF 的「创建文档」选择器，默认建议文件名 */
@@ -447,7 +432,9 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     val progress = ThrottledProgress(args.channel)
     activity.runBackground(invoke, "写入所选位置失败") {
       if (!src.isFile) throw IllegalStateException("找不到待导出的文件")
-      val name = sanitizeName(queryDisplayName(uri) ?: args.fileName ?: "漫画.zip")
+      val name = sanitizeName(
+        activity.contentResolver.queryDisplayName(uri) ?: args.fileName ?: "漫画.zip"
+      )
       activity.contentResolver.openOutputStream(uri)?.use { out ->
         copyFileWithProgress(src, out, progress)
       } ?: throw IllegalStateException("无法写入所选位置")
@@ -494,168 +481,11 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     null
   }
 
-  /** 查询 content:// URI 的文件大小；提供者不给时返回 null */
-  private fun querySize(uri: Uri): Long? {
-    val projection = arrayOf(OpenableColumns.SIZE)
-    activity.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-      if (cursor.moveToFirst()) {
-        val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
-        if (idx >= 0 && !cursor.isNull(idx)) return cursor.getLong(idx)
-      }
-    }
-    return null
-  }
-
   private fun prepareDir(name: String, wipe: Boolean = false): File {
     val dir = File(activity.cacheDir, name)
     if (wipe) dir.deleteRecursively()
     dir.mkdirs()
     return dir
-  }
-
-  /** 把 content:// URI 的内容写成一个真实文件，返回其绝对路径（失败返回 null）。
-   *  onBytes 按 8KB 块回调本次搬运的字节数（进度条用，节流在 reportCopy 里做）。
-   *  不用 InputStream.copyTo：那个重载不给中间进度，单个大文件会让进度条
-   *  长时间停在 0 再一步跳到 100%。 */
-  private fun copyUriToFile(
-    uri: Uri,
-    dir: File,
-    ensureZipExtension: Boolean,
-    onBytes: (Long) -> Unit = {}
-  ): String? {
-    var name = sanitizeName(
-      queryDisplayName(uri) ?: uri.lastPathSegment ?: "file-${System.currentTimeMillis()}"
-    )
-    // 少数提供者查不到显示名，回退值可能形如 "msf:42"（含点但不是 .zip）；
-    // 导入端按扩展名判断 zip，这里统一保证后缀正确
-    if (ensureZipExtension && !name.endsWith(".zip", ignoreCase = true)) name = "$name.zip"
-    val out = uniqueFile(dir, name)
-    val stream = activity.contentResolver.openInputStream(uri)
-    if (stream == null) {
-      Logger.error("无法打开所选文件: $uri")
-      return null
-    }
-    val buffer = ByteArray(64 * 1024)
-    stream.use { input ->
-      FileOutputStream(out).use { output ->
-        while (true) {
-          val read = input.read(buffer)
-          if (read < 0) break
-          output.write(buffer, 0, read)
-          onBytes(read.toLong())
-        }
-      }
-    }
-    return out.absolutePath
-  }
-
-  /** 同名文件加序号，避免一次多选时互相覆盖 */
-  private fun uniqueFile(dir: File, name: String): File {
-    var candidate = File(dir, name)
-    if (!candidate.exists()) return candidate
-    val stem = name.substringBeforeLast('.')
-    val ext = name.substringAfterLast('.', "")
-    var n = 2
-    while (candidate.exists()) {
-      candidate = if (ext.isEmpty()) File(dir, "$stem-$n") else File(dir, "$stem-$n.$ext")
-      n += 1
-    }
-    return candidate
-  }
-
-  /** 深度优先遍历 SAF 目录树。
-   *
-   * 用显式栈而非递归：深层目录树会把线程栈爆掉，而 StackOverflowError 不是
-   * Exception、catch 不住，未捕获的 Error 会直接让进程闪退。
-   * visitDir 决定子目录对应的本地目录（大小预估时可原样透传、不建目录），
-   * onFile 对每个文件回调（size = null 表示提供者不给出文件大小）。 */
-  private inline fun walkTree(
-    treeUri: Uri,
-    dest: File,
-    visitDir: (File, String) -> File = { dir, name -> File(dir, name).also { it.mkdirs() } },
-    onFile: (Uri, File, Long?) -> Unit,
-  ) {
-    val stack = ArrayDeque<Pair<Uri, File>>()
-    stack.addLast(
-      DocumentsContract.buildChildDocumentsUriUsingTree(
-        treeUri,
-        DocumentsContract.getTreeDocumentId(treeUri)
-      ) to dest
-    )
-    while (stack.isNotEmpty()) {
-      val (childrenUri, dir) = stack.removeLast()
-      activity.contentResolver.query(
-        childrenUri,
-        arrayOf(
-          DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-          DocumentsContract.Document.COLUMN_MIME_TYPE,
-          DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-          DocumentsContract.Document.COLUMN_SIZE
-        ),
-        null, null, null
-      )?.use { cursor ->
-        while (cursor.moveToNext()) {
-          val docId = cursor.getString(0) ?: continue
-          val mime = cursor.getString(1)
-          val name = sanitizeName(cursor.getString(2) ?: docId)
-          if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-            stack.addLast(
-              DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId) to visitDir(dir, name)
-            )
-          } else {
-            val size = if (cursor.isNull(3)) null else cursor.getLong(3)
-            onFile(DocumentsContract.buildDocumentUriUsingTree(treeUri, docId), dir, size)
-          }
-        }
-      }
-    }
-  }
-
-  private fun copyTree(treeUri: Uri, dest: File, onFile: (Long) -> Unit = {}) {
-    walkTree(treeUri, dest) { docUri, dir, _ ->
-      copyUriToFile(docUri, dir, ensureZipExtension = false) { n -> onFile(n) }
-    }
-  }
-
-  /** 统计目录树全部文件大小；任一文件大小未知时返回 null（放弃预估、直接放行） */
-  private fun treeTotalSize(treeUri: Uri): Long? {
-    var total = 0L
-    walkTree(treeUri, File("/"), visitDir = { dir, _ -> dir }) { _, _, size ->
-      size ?: return null
-      total += size
-    }
-    return total
-  }
-
-  private fun treeDisplayName(treeUri: Uri): String {
-    val docId = DocumentsContract.getTreeDocumentId(treeUri)
-    val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-    return sanitizeName(queryDisplayName(docUri) ?: docId.substringAfterLast(':'))
-  }
-
-  private fun queryDisplayName(uri: Uri): String? {
-    val projection = arrayOf(OpenableColumns.DISPLAY_NAME)
-    activity.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-      if (cursor.moveToFirst()) {
-        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (idx >= 0) return cursor.getString(idx)
-      }
-    }
-    return null
-  }
-
-  /**
-   * 清洗文档提供者返回的名称：路径分隔符、NUL 与前导点都可能让文件被写到
-   * 缓存目录之外（如 "../../xxx"），统一替换掉。
-   */
-  private fun sanitizeName(raw: String): String {
-    val cleaned = raw
-      .replace('/', '_')
-      .replace('\\', '_')
-      .replace('\u0000', '_')
-      .trim()
-      .trimStart('.')
-    return cleaned.ifEmpty { "unnamed" }
   }
 
   companion object {
