@@ -16,6 +16,7 @@ import androidx.activity.result.ActivityResult
 import androidx.annotation.RequiresApi
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import kotlin.math.roundToInt
 import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -264,9 +265,15 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     activity.finish()
   }
 
-  /** 系统栏高度（px）：top = 状态栏，bottom = 导航栏。
+  /** 系统栏高度（CSS px，即 dp）：top = 状态栏，bottom = 导航栏。
+   *
    *  WebView 的 env(safe-area-inset-*) 在部分设备上取不到值（返回 0），
-   *  顶栏 / 底栏 / 弹窗的避让改由前端查询这里的真实高度。 */
+   *  顶栏 / 底栏 / 弹窗的避让改由前端查询这里的真实高度。
+   *
+   *  单位必须换算：WindowInsets 给的是物理像素，而 WebView 里的 CSS px 是
+   *  密度无关像素（dp），直接送回前端会整整大出一个屏幕密度倍数——3x 机上
+   *  24dp 的状态栏被报成 72px，留出一条宽得离谱的白带。除以 density 换算
+   *  成 dp 再返回，与 env() 的口径一致。 */
   @Command
   fun systemBarInsets(invoke: Invoke) {
     val rootInsets = activity.window?.decorView?.rootWindowInsets
@@ -275,10 +282,17 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     } else {
       WindowInsetsCompat.CONSUMED
     }
+    val density = activity.resources.displayMetrics.density
     invoke.resolve(
       JSObject()
-        .put("top", insets.getInsets(WindowInsetsCompat.Type.statusBars()).top)
-        .put("bottom", insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom)
+        .put(
+          "top",
+          (insets.getInsets(WindowInsetsCompat.Type.statusBars()).top / density).roundToInt(),
+        )
+        .put(
+          "bottom",
+          (insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom / density).roundToInt(),
+        )
     )
   }
 

@@ -52,9 +52,10 @@
   --glass-fill: rgba(255, 255, 255, 0.55);
   --glass-blur: 20px;
 
-  /* 系统栏避让高度：默认取 env()（桌面 / iOS 行为）；
+  /* 系统栏避让高度（CSS px，即 dp）：默认取 env()（桌面 / iOS 行为）；
      安卓上 WebView 的 env(safe-area-inset-*) 在部分设备上返回 0，
-     由 useSystemBarInsets 经原生桥覆写为真实高度 */
+     由 useSystemBarInsets 经原生桥覆写为真实高度（原生侧已按屏幕密度
+     把物理像素换算成 dp，与 env() 同口径） */
   --status-bar-h: env(safe-area-inset-top);
   --nav-bar-h: env(safe-area-inset-bottom);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;

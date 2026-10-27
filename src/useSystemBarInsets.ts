@@ -7,6 +7,7 @@ import { systemBarInsets } from "./api";
  *  顶栏 / 底栏 / 弹窗的避让不能只依赖它。这里在启动时、以及每次窗口尺寸
  *  变化（旋屏、折叠屏形态切换——Activity 声明了 configChanges，页面不重载）
  *  后向原生桥查询一次真实高度，覆写 :root 里的 env() 默认值。
+ *  原生桥返回的是换算成 CSS px（dp）的高度，与 env() 同口径，直接用。
  *  桌面端命令不存在，静默跳过，CSS 变量保持 env() 回退。 */
 export function useSystemBarInsets() {
   useEffect(() => {
