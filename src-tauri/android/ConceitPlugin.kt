@@ -70,15 +70,6 @@ internal class StatusBarArgs {
 @TauriPlugin
 class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
 
-  /** 复制进度节流状态（reportCopy 用；同一时刻只有一个导入任务，简单记录即可） */
-  private val reportLock = Any()
-  private var reportLast = 0L
-
-  /** 落盘进度节流状态（reportSave 用）：与 reportCopy 分开一把锁，
-   *  导出的「落盘」段与导入的复制互不干扰 */
-  private val saveReportLock = Any()
-  private var saveReportLast = 0L
-
   /** 选择 zip 文件（可多选），复制进缓存目录，返回真实路径列表 */
   @Command
   fun pickZipFiles(invoke: Invoke) {
@@ -108,7 +99,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     } else {
       data?.data?.let { uris.add(it) }
     }
-    val channel = parseChannel(invoke)
+    val progress = ThrottledProgress(parseChannel(invoke))
     // 复制可能很慢：放后台线程，完成后回主线程 resolve
     activity.runBackground(invoke, "读取所选文件失败") {
       val dir = prepareDir("picked-import", wipe = true)
@@ -119,7 +110,14 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         var done = 0L
         val path = copyUriToFile(uri, dir, ensureZipExtension = true) { n ->
           done += n
-          reportCopy(channel, i + 1, uris.size, name, done, size ?: 0L)
+          progress.send {
+            put("phase", "copy")
+            put("index", i + 1)
+            put("total", uris.size)
+            put("title", name)
+            put("doneBytes", done)
+            put("totalBytes", size ?: 0L)
+          }
         }
         if (path != null) paths.add(path)
       }
@@ -216,14 +214,21 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
           return@runBackground
         }
       }
-      val channel = parseChannel(invoke)
+      val progress = ThrottledProgress(parseChannel(invoke))
       val title = dest.name
       var done = 0L
       var count = 0
       copyTree(treeUri, dest) { n ->
         done += n
         count += 1
-        reportCopy(channel, 1, 1, title, done, total ?: 0L)
+        progress.send {
+          put("phase", "copy")
+          put("index", 1)
+          put("total", 1)
+          put("title", title)
+          put("doneBytes", done)
+          put("totalBytes", total ?: 0L)
+        }
       }
       // 磁盘上的文件数多于本次复制数，说明缓存里有上一次导入的残留——
       // 这正是「一部漫画出现两份」的典型成因
@@ -346,7 +351,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      saveViaMediaStore(invoke, src, fileName, args.channel)
+      saveViaMediaStore(invoke, src, fileName, ThrottledProgress(args.channel))
     } else {
       startCreateDocument(invoke, src, fileName)
     }
@@ -355,7 +360,12 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   /** MediaStore 直写下载目录（API 29+）。IS_PENDING 先置 1，复制完成再归零，
    *  半截文件不会暴露给其他应用；中途失败把这条记录删掉，不留垃圾。 */
   @RequiresApi(Build.VERSION_CODES.Q)
-  private fun saveViaMediaStore(invoke: Invoke, src: File, fileName: String, channel: Channel?) {
+  private fun saveViaMediaStore(
+    invoke: Invoke,
+    src: File,
+    fileName: String,
+    progress: ThrottledProgress,
+  ) {
     activity.runBackground(invoke, "写入下载目录失败") {
       val resolver = activity.contentResolver
       val name = uniqueDownloadsName(resolver, fileName)
@@ -368,7 +378,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
         ?: throw IllegalStateException("无法在下载目录创建文件")
       try {
         resolver.openOutputStream(uri)?.use { out ->
-          copyFileWithProgress(src, out, channel)
+          copyFileWithProgress(src, out, progress)
         } ?: throw IllegalStateException("无法写入下载目录")
         val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
         resolver.update(uri, done, null, null)
@@ -434,21 +444,21 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     val src = File(args.path ?: "")
-    val channel = args.channel
+    val progress = ThrottledProgress(args.channel)
     activity.runBackground(invoke, "写入所选位置失败") {
       if (!src.isFile) throw IllegalStateException("找不到待导出的文件")
       val name = sanitizeName(queryDisplayName(uri) ?: args.fileName ?: "漫画.zip")
       activity.contentResolver.openOutputStream(uri)?.use { out ->
-        copyFileWithProgress(src, out, channel)
+        copyFileWithProgress(src, out, progress)
       } ?: throw IllegalStateException("无法写入所选位置")
       activity.resolveOnUi(invoke) { JSObject().put("name", name) }
     }
   }
 
-  /** 把文件复制进输出流，按 8KB 块回调进度（节流在 reportSave 里做）。
+  /** 把文件复制进输出流，按 64KB 块回调进度（节流在 ThrottledProgress 里做）。
    *  与 copyUriToFile 同样不用 InputStream.copyTo：单个大 zip 会让进度条
    *  长时间停在 0 再一步跳到 100%。 */
-  private fun copyFileWithProgress(src: File, out: OutputStream, channel: Channel?) {
+  private fun copyFileWithProgress(src: File, out: OutputStream, progress: ThrottledProgress) {
     val buffer = ByteArray(64 * 1024)
     var done = 0L
     val total = src.length()
@@ -459,27 +469,14 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
           if (read < 0) break
           output.write(buffer, 0, read)
           done += read
-          reportSave(channel, done, total)
+          progress.send {
+            put("phase", "save")
+            put("doneBytes", done)
+            put("totalBytes", total)
+          }
         }
       }
     }
-  }
-
-  /** 落盘进度上报：约 10 次/秒，字段与 Rust 侧 ExportProgress 一致。
-   *  与 reportCopy 分开一把锁：导出的「落盘」段与导入的复制互不干扰。 */
-  private fun reportSave(channel: Channel?, doneBytes: Long, totalBytes: Long) {
-    if (channel == null) return
-    val now = System.currentTimeMillis()
-    synchronized(saveReportLock) {
-      if (now - saveReportLast < 100) return
-      saveReportLast = now
-    }
-    channel.send(
-      JSObject()
-        .put("phase", "save")
-        .put("doneBytes", doneBytes)
-        .put("totalBytes", totalBytes)
-    )
   }
 
   // ---------- 内部实现 ----------
@@ -495,34 +492,6 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   } catch (e: Throwable) {
     Logger.error("解析进度通道失败: ${e.message}")
     null
-  }
-
-  /** 复制进度节流上报：约 10 次/秒，字段与 Rust 侧 ImportProgress 一致。
-   *  doneBytes 由调用方按「当前这一部」累计（一部目录或一个 zip 各自从 0 起算）。 */
-  private fun reportCopy(
-    channel: Channel?,
-    index: Int,
-    total: Int,
-    title: String,
-    doneBytes: Long,
-    totalBytes: Long
-  ) {
-    if (channel == null) return
-    val now = System.currentTimeMillis()
-    synchronized(reportLock) {
-      if (now - reportLast < 100) return
-      reportLast = now
-    }
-    // send 放在锁外：它会走 JNI 到 Rust，没必要让整个复制过程串行等待
-    channel.send(
-      JSObject()
-        .put("phase", "copy")
-        .put("index", index)
-        .put("total", total)
-        .put("title", title)
-        .put("doneBytes", doneBytes)
-        .put("totalBytes", totalBytes)
-    )
   }
 
   /** 查询 content:// URI 的文件大小；提供者不给时返回 null */
