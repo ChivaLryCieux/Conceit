@@ -1,6 +1,5 @@
 package com.conceit.mangareader
 
-import android.content.Context
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
@@ -33,13 +32,12 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
 
     // 状态栏图标深浅跟随界面风格：白色主题 = 深色图标，黑色主题 = 浅色图标。
-    // 初值取上次的选择（前端切风格时经插件写进 SharedPreferences），
+    // 初值取上次的选择（前端切风格时经插件写进 StatusBarPrefs），
     // 没有记录（首次安装）按默认的白色主题给深色图标——WebView 首帧画出来
     // 之前系统栏已经在显示，选错会闪一下另一种配色。
-    val uiPrefs = getSharedPreferences(ConceitPlugin.PREFS_NAME, Context.MODE_PRIVATE)
+    val lightStatusBars = StatusBarPrefs.lightStatusBars(this)
     WindowInsetsControllerCompat(window, window.decorView).apply {
-      isAppearanceLightStatusBars =
-        uiPrefs.getBoolean(ConceitPlugin.KEY_LIGHT_STATUS_BARS, true)
+      isAppearanceLightStatusBars = lightStatusBars
       isAppearanceLightNavigationBars = false
     }
 

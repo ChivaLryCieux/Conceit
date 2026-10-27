@@ -2,7 +2,6 @@ package com.conceit.mangareader
 
 import android.app.Activity
 import android.content.ContentValues
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -98,7 +97,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     val progress = ThrottledProgress(parseChannel(invoke))
     // 复制可能很慢：放后台线程，完成后回主线程 resolve
     activity.runBackground(invoke, "读取所选文件失败") {
-      val dir = prepareDir("picked-import", wipe = true)
+      val dir = ImportCache.PICKED_IMPORT.prepare(activity, wipe = true)
       val paths = ArrayList<String>()
       uris.forEachIndexed { i, uri ->
         val size = activity.contentResolver.querySize(uri)
@@ -151,7 +150,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     }
     // 与 zip 选择相同：复制放后台线程，完成后回主线程 resolve
     activity.runBackground(invoke, "读取所选图片失败") {
-      val dir = prepareDir("picked-images", wipe = true)
+      val dir = ImportCache.PICKED_IMAGES.prepare(activity, wipe = true)
       val paths = uris.mapNotNull { uri ->
         activity.contentResolver.copyUriToFile(uri, dir, ensureZipExtension = false)
       }
@@ -187,10 +186,10 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       },
     ) {
       // 目录名取自所选文件夹的显示名，导入后的漫画标题才有意义
-      val cacheRoot = File(activity.cacheDir, "tree-import")
+      val cacheRoot = ImportCache.TREE_IMPORT.dir(activity)
       val cacheExisted = cacheRoot.exists()
       val dest = File(
-        prepareDir("tree-import", wipe = true),
+        ImportCache.TREE_IMPORT.prepare(activity, wipe = true),
         activity.contentResolver.treeDisplayName(treeUri)
       )
       dest.mkdirs()
@@ -242,9 +241,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun clearImportCache(invoke: Invoke) {
     activity.runBackground(invoke, "清理导入缓存失败") {
-      File(activity.cacheDir, "picked-import").deleteRecursively()
-      File(activity.cacheDir, "tree-import").deleteRecursively()
-      File(activity.cacheDir, "picked-images").deleteRecursively()
+      ImportCache.entries.forEach { it.dir(activity).deleteRecursively() }
       activity.resolveOnUi(invoke) { JSObject().put("cleared", true) }
     }
   }
@@ -295,8 +292,9 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
    *  WindowInsetsControllerCompat 在原生侧切换。前端在应用界面风格时调用
    *  （见 src/theme.ts 的 applyTheme）。
    *
-   *  同时把选择记进 SharedPreferences：MainActivity 冷启动时先读它作为初值，
-   *  黑色主题的用户就不必每次打开都先闪一下深色图标（见 MainActivity.onCreate）。 */
+   *  同时把选择记进 StatusBarPrefs：MainActivity 冷启动时先读它作为初值，
+   *  黑色主题的用户就不必每次打开都先闪一下深色图标（见 MainActivity.onCreate）。
+   *  这份偏好是 MainActivity 与本插件之间唯一的共享契约，见 StatusBarPrefs。 */
   @Command
   fun setStatusBarStyle(invoke: Invoke) {
     val args = try {
@@ -305,11 +303,7 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.reject("状态栏参数解析失败")
       return
     }
-    activity
-      .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-      .edit()
-      .putBoolean(KEY_LIGHT_STATUS_BARS, args.light)
-      .apply()
+    StatusBarPrefs.setLightStatusBars(activity, args.light)
     applyLightStatusBars(args.light)
     invoke.resolve()
   }
@@ -479,20 +473,5 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
   } catch (e: Throwable) {
     Logger.error("解析进度通道失败: ${e.message}")
     null
-  }
-
-  private fun prepareDir(name: String, wipe: Boolean = false): File {
-    val dir = File(activity.cacheDir, name)
-    if (wipe) dir.deleteRecursively()
-    dir.mkdirs()
-    return dir
-  }
-
-  companion object {
-    /** 界面状态的持久化文件（MainActivity 冷启动时读同一份，作为系统栏配色初值） */
-    const val PREFS_NAME = "conceit-ui"
-
-    /** 状态栏图标是否用深色：true = 白色主题，false = 黑色主题 */
-    const val KEY_LIGHT_STATUS_BARS = "light_status_bars"
   }
 }
