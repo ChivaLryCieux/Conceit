@@ -964,7 +964,7 @@ fn save_to_download_dir(
 /// 桌面端直接把 zip 挪进 `download_dir()`；安卓上书库位于应用私有目录，
 /// 前端既读不到也写不出去，由内置 Kotlin 插件经 MediaStore（Android 10+，
 /// 无需任何权限）或 SAF「创建文档」选择器（更低版本）写进公共下载目录，
-/// 见 [`crate::mobile_import::save_to_downloads`]。
+/// 见 [`crate::mobile_bridge::save_to_downloads`]。
 ///
 /// 持锁分两段（与 import_sources 同一模式）：先短锁取出这部漫画的标题 /
 /// 目录 / 页表，打包与拷贝全程不持锁——大漫画可能几分钟，期间用户仍能
@@ -1048,7 +1048,7 @@ pub async fn export_manga(
     let dest = {
         #[cfg(target_os = "android")]
         let result =
-            crate::mobile_import::save_to_downloads(&app, &zip_path, &file_name, &channel).await;
+            crate::mobile_bridge::save_to_downloads(&app, &zip_path, &file_name, &channel).await;
         #[cfg(not(target_os = "android"))]
         let result = save_to_download_dir(&app, &zip_path, &file_name);
         result

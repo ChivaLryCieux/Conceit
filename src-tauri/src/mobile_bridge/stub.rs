@@ -1,4 +1,4 @@
-//! 桌面端存根：导入桥的命令只在 Android 上有意义（见 [super] 的模块文档）。
+//! 桌面端存根：原生桥的命令只在 Android 上有意义（见 [super] 的模块文档）。
 //! 前端按平台分流，正常不会调用到这里；留一份同签名实现，
 //! 既让 `invoke_handler` 的注册与平台无关，也在误用时给出可读的错误。
 
@@ -55,7 +55,7 @@ pub async fn set_status_bar_style(_light: bool) -> Result<(), String> {
 
 /// `save_to_downloads` 的桌面存根：桌面端由
 /// [`crate::commands::save_to_download_dir`] 直接写 `download_dir()`，
-/// 走不到这里；留一份同签名实现只为让 `mobile_import::*` 的再导出
+/// 走不到这里；留一份同签名实现只为让 `mobile_bridge::*` 的再导出
 /// 在两个平台上形状一致。
 #[allow(dead_code)]
 pub async fn save_to_downloads(

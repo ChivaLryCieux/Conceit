@@ -75,7 +75,7 @@ export function useShelfMutations({
       if (android) {
         // Android：插件对话框不支持选目录，文件选择器返回的也是 content:// URI，
         // std::fs 用不了——走内置原生桥，直接拿到缓存里的真实路径
-        // （见 src-tauri/src/mobile_import.rs 与 src-tauri/android/ConceitPlugin.kt）
+        // （见 src-tauri/src/mobile_bridge.rs 与 src-tauri/android/ConceitPlugin.kt）
         if (kind === "dir") {
           // 选完目录后原生侧要先统计总大小做空间预估，可能有几秒等待，
           // 先把遮罩挂上；不清 busy 直接进入「正在导入」，避免闪烁

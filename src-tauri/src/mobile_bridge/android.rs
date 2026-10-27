@@ -22,7 +22,7 @@ const PLUGIN_CLASS: &str = "ConceitPlugin";
 /// 保存在 Tauri 状态里的 Kotlin 插件句柄
 pub struct ImportHandle<R: Runtime>(PluginHandle<R>);
 
-/// 注册插件；在 `lib.rs` 里以 `.plugin(mobile_import::init())` 接入
+/// 注册插件；在 `lib.rs` 里以 `.plugin(mobile_bridge::init())` 接入
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new(PLUGIN_NAME)
         .setup(|app, api| {

@@ -257,7 +257,7 @@ src-tauri/                   后端（Rust + Tauri 2）
 ├── migrations/              schema 迁移（include_str! 编译期内嵌，按版本号递增）
 │   └── 001_init.sql         items / pages / container_order / meta 四张表
 ├── src/commands.rs          Tauri 命令层（快照 / 增删改 / 排序 / 进度 / 导入 / 漫画图片管理）
-├── src/mobile_import.rs     Android 原生桥（SAF 目录 / zip / 图片选择等，桌面端为存根）
+├── src/mobile_bridge.rs     Android 原生桥（SAF 目录 / zip / 图片选择等，桌面端为存根）
 ├── android/ConceitPlugin.kt Android 原生桥的 Kotlin 实现（构建时同步进 gen/android）
 ├── android/MainActivity.kt  主 Activity：拦截系统返回转交前端（构建时同步进 gen/android）
 └── tauri.conf.json          桌面配置（asset 协议加载本地图片）

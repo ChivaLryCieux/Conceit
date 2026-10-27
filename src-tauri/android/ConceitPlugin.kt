@@ -48,7 +48,7 @@ internal class StatusBarArgs {
  *    Rust 的 std::fs 无法读取（表现为「路径不存在」）。
  *
  * 这里用系统文档选择器（SAF）完成「选择 → 复制到应用缓存目录 → 返回真实路径」，
- * Rust 侧之后按普通文件夹 / zip 处理（见 src-tauri/src/mobile_import.rs）。
+ * Rust 侧之后按普通文件夹 / zip 处理（见 src-tauri/src/mobile_bridge.rs）。
  * 复制时保留原始名称，导入后的漫画标题仍然是有意义的文件夹名 / 压缩包名。
  *
  * 除导入选择外，桌面端没有对应物的原生能力（退出应用、系统栏高度…）

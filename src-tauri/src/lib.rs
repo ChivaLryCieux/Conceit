@@ -3,7 +3,7 @@
 mod commands;
 pub mod db;
 mod library;
-mod mobile_import;
+mod mobile_bridge;
 
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
@@ -37,8 +37,8 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
-        // Android 导入桥（SAF 目录 / zip 选择）；桌面端为空插件
-        .plugin(mobile_import::init())
+        // Android 原生桥（SAF 目录 / zip / 图片选择、导出落盘、系统栏…）；桌面端为空插件
+        .plugin(mobile_bridge::init())
         .invoke_handler(tauri::generate_handler![
             commands::library_snapshot,
             commands::create_folder,
@@ -60,13 +60,13 @@ pub fn run() {
             commands::reorder_manga_pages,
             commands::export_manga,
             commands::app_platform,
-            mobile_import::pick_directory,
-            mobile_import::pick_zip_files,
-            mobile_import::pick_images,
-            mobile_import::clear_import_cache,
-            mobile_import::exit_app,
-            mobile_import::system_bar_insets,
-            mobile_import::set_status_bar_style,
+            mobile_bridge::pick_directory,
+            mobile_bridge::pick_zip_files,
+            mobile_bridge::pick_images,
+            mobile_bridge::clear_import_cache,
+            mobile_bridge::exit_app,
+            mobile_bridge::system_bar_insets,
+            mobile_bridge::set_status_bar_style,
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");
