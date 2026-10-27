@@ -64,7 +64,8 @@ internal class StatusBarArgs {
  * 「创建文档」（更低版本）写进系统的公共下载目录。
  *
  * 注意：ActivityResult 回调运行在主线程，复制整棵目录树可能很慢，
- * 因此复制放在后台线程做，完成后回到主线程 resolve，避免 ANR。
+ * 因此复制放在后台线程做，完成后回到主线程 resolve，避免 ANR——
+ * 这套「后台执行 + 统一兜错 + 回主线程」的骨架见 InvokeExt.kt。
  */
 @TauriPlugin
 class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
@@ -109,25 +110,21 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     }
     val channel = parseChannel(invoke)
     // 复制可能很慢：放后台线程，完成后回主线程 resolve
-    Thread {
-      try {
-        val dir = prepareDir("picked-import", wipe = true)
-        val paths = ArrayList<String>()
-        uris.forEachIndexed { i, uri ->
-          val size = querySize(uri)
-          val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "file-$i"
-          var done = 0L
-          val path = copyUriToFile(uri, dir, ensureZipExtension = true) { n ->
-            done += n
-            reportCopy(channel, i + 1, uris.size, name, done, size ?: 0L)
-          }
-          if (path != null) paths.add(path)
+    activity.runBackground(invoke, "读取所选文件失败") {
+      val dir = prepareDir("picked-import", wipe = true)
+      val paths = ArrayList<String>()
+      uris.forEachIndexed { i, uri ->
+        val size = querySize(uri)
+        val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "file-$i"
+        var done = 0L
+        val path = copyUriToFile(uri, dir, ensureZipExtension = true) { n ->
+          done += n
+          reportCopy(channel, i + 1, uris.size, name, done, size ?: 0L)
         }
-        resolveOnUi(invoke) { pathsResponse(paths) }
-      } catch (e: Throwable) {
-        rejectOnUi(invoke, e.message ?: "读取所选文件失败")
+        if (path != null) paths.add(path)
       }
-    }.start()
+      activity.resolveOnUi(invoke) { pathsResponse(paths) }
+    }
   }
 
   /** 选择图片文件（可多选），复制进缓存目录，返回真实路径列表。
@@ -158,17 +155,13 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       data?.data?.let { uris.add(it) }
     }
     // 与 zip 选择相同：复制放后台线程，完成后回主线程 resolve
-    Thread {
-      try {
-        val dir = prepareDir("picked-images", wipe = true)
-        val paths = uris.mapNotNull { uri ->
-          copyUriToFile(uri, dir, ensureZipExtension = false)
-        }
-        resolveOnUi(invoke) { pathsResponse(paths) }
-      } catch (e: Throwable) {
-        rejectOnUi(invoke, e.message ?: "读取所选图片失败")
+    activity.runBackground(invoke, "读取所选图片失败") {
+      val dir = prepareDir("picked-images", wipe = true)
+      val paths = uris.mapNotNull { uri ->
+        copyUriToFile(uri, dir, ensureZipExtension = false)
       }
-    }.start()
+      activity.resolveOnUi(invoke) { pathsResponse(paths) }
+    }
   }
 
   /** 选择目录（SAF 树选择器），整棵树复制进缓存目录，返回目录路径 */
@@ -191,69 +184,64 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       invoke.resolve(JSObject())
       return
     }
-    Thread {
-      try {
-        // 目录名取自所选文件夹的显示名，导入后的漫画标题才有意义
-        val cacheRoot = File(activity.cacheDir, "tree-import")
-        val cacheExisted = cacheRoot.exists()
-        val dest = File(prepareDir("tree-import", wipe = true), treeDisplayName(treeUri))
-        dest.mkdirs()
-        Log.i(
-          "ConceitImport",
-          "SAF 目录选择返回 $treeUri; 缓存目录${if (cacheExisted) "有残留(已清空重建)" else "为空"} → ${dest.absolutePath}"
-        )
-        // 安卓导入是「SAF 拷进缓存 + Rust 再拷进书库」两份占用，拷到一半
-        // 空间不足只会得到一条错误、白等几分钟。先按目录总大小预估，不够
-        // 就提前拒绝；提供者不给文件大小时放弃预估、照常导入。
-        val total = treeTotalSize(treeUri)
-        if (total != null) {
-          val usable = activity.cacheDir.usableSpace
-          val need = total * 2 + 64L * 1024 * 1024
-          if (usable < need) {
-            Log.e("ConceitImport", "存储空间不足: 需 ${need / 1024 / 1024}MB, 可用 ${usable / 1024 / 1024}MB")
-            rejectOnUi(
-              invoke,
-              "存储空间不足：导入约需 ${need / 1024 / 1024}MB，当前可用 ${usable / 1024 / 1024}MB"
-            )
-            return@Thread
-          }
+    activity.runBackground(
+      invoke,
+      "读取所选目录失败",
+      onError = {
+        Log.e("ConceitImport", "SAF 复制失败: ${it.javaClass.name}: ${it.message}", it)
+      },
+    ) {
+      // 目录名取自所选文件夹的显示名，导入后的漫画标题才有意义
+      val cacheRoot = File(activity.cacheDir, "tree-import")
+      val cacheExisted = cacheRoot.exists()
+      val dest = File(prepareDir("tree-import", wipe = true), treeDisplayName(treeUri))
+      dest.mkdirs()
+      Log.i(
+        "ConceitImport",
+        "SAF 目录选择返回 $treeUri; 缓存目录${if (cacheExisted) "有残留(已清空重建)" else "为空"} → ${dest.absolutePath}"
+      )
+      // 安卓导入是「SAF 拷进缓存 + Rust 再拷进书库」两份占用，拷到一半
+      // 空间不足只会得到一条错误、白等几分钟。先按目录总大小预估，不够
+      // 就提前拒绝；提供者不给文件大小时放弃预估、照常导入。
+      val total = treeTotalSize(treeUri)
+      if (total != null) {
+        val usable = activity.cacheDir.usableSpace
+        val need = total * 2 + 64L * 1024 * 1024
+        if (usable < need) {
+          Log.e("ConceitImport", "存储空间不足: 需 ${need / 1024 / 1024}MB, 可用 ${usable / 1024 / 1024}MB")
+          activity.rejectOnUi(
+            invoke,
+            "存储空间不足：导入约需 ${need / 1024 / 1024}MB，当前可用 ${usable / 1024 / 1024}MB"
+          )
+          return@runBackground
         }
-        val channel = parseChannel(invoke)
-        val title = dest.name
-        var done = 0L
-        var count = 0
-        copyTree(treeUri, dest) { n ->
-          done += n
-          count += 1
-          reportCopy(channel, 1, 1, title, done, total ?: 0L)
-        }
-        // 磁盘上的文件数多于本次复制数，说明缓存里有上一次导入的残留——
-        // 这正是「一部漫画出现两份」的典型成因
-        val onDisk = dest.walkTopDown().count { it.isFile }
-        Log.i("ConceitImport", "SAF 复制完成: 本次 $count 个 / 磁盘共 $onDisk 个 / $done 字节 → ${dest.absolutePath}")
-        resolveOnUi(invoke) { JSObject().put("path", dest.absolutePath) }
-      } catch (e: Throwable) {
-        // Throwable 而非 Exception：OOM、StackOverflowError 也要能转成一条
-        // 错误提示，而不是未捕获异常直接杀掉进程（用户看到的就是闪退）
-        Log.e("ConceitImport", "SAF 复制失败: ${e.javaClass.name}: ${e.message}", e)
-        rejectOnUi(invoke, e.message ?: "读取所选目录失败")
       }
-    }.start()
+      val channel = parseChannel(invoke)
+      val title = dest.name
+      var done = 0L
+      var count = 0
+      copyTree(treeUri, dest) { n ->
+        done += n
+        count += 1
+        reportCopy(channel, 1, 1, title, done, total ?: 0L)
+      }
+      // 磁盘上的文件数多于本次复制数，说明缓存里有上一次导入的残留——
+      // 这正是「一部漫画出现两份」的典型成因
+      val onDisk = dest.walkTopDown().count { it.isFile }
+      Log.i("ConceitImport", "SAF 复制完成: 本次 $count 个 / 磁盘共 $onDisk 个 / $done 字节 → ${dest.absolutePath}")
+      activity.resolveOnUi(invoke) { JSObject().put("path", dest.absolutePath) }
+    }
   }
 
   /** 清理导入用的缓存目录（前端导入 / 增加图片完成后调用） */
   @Command
   fun clearImportCache(invoke: Invoke) {
-    Thread {
-      try {
-        File(activity.cacheDir, "picked-import").deleteRecursively()
-        File(activity.cacheDir, "tree-import").deleteRecursively()
-        File(activity.cacheDir, "picked-images").deleteRecursively()
-        resolveOnUi(invoke) { JSObject().put("cleared", true) }
-      } catch (e: Throwable) {
-        rejectOnUi(invoke, e.message ?: "清理导入缓存失败")
-      }
-    }.start()
+    activity.runBackground(invoke, "清理导入缓存失败") {
+      File(activity.cacheDir, "picked-import").deleteRecursively()
+      File(activity.cacheDir, "tree-import").deleteRecursively()
+      File(activity.cacheDir, "picked-images").deleteRecursively()
+      activity.resolveOnUi(invoke) { JSObject().put("cleared", true) }
+    }
   }
 
   /** 退出应用：安卓系统返回在书架根目录时由前端调用。
@@ -368,32 +356,28 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
    *  半截文件不会暴露给其他应用；中途失败把这条记录删掉，不留垃圾。 */
   @RequiresApi(Build.VERSION_CODES.Q)
   private fun saveViaMediaStore(invoke: Invoke, src: File, fileName: String, channel: Channel?) {
-    Thread {
-      try {
-        val resolver = activity.contentResolver
-        val name = uniqueDownloadsName(resolver, fileName)
-        val values = ContentValues().apply {
-          put(MediaStore.Downloads.DISPLAY_NAME, name)
-          put(MediaStore.Downloads.MIME_TYPE, "application/zip")
-          put(MediaStore.Downloads.IS_PENDING, 1)
-        }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-          ?: throw IllegalStateException("无法在下载目录创建文件")
-        try {
-          resolver.openOutputStream(uri)?.use { out ->
-            copyFileWithProgress(src, out, channel)
-          } ?: throw IllegalStateException("无法写入下载目录")
-          val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-          resolver.update(uri, done, null, null)
-          resolveOnUi(invoke) { JSObject().put("name", name) }
-        } catch (e: Throwable) {
-          runCatching { resolver.delete(uri, null, null) }
-          throw e
-        }
-      } catch (e: Throwable) {
-        rejectOnUi(invoke, e.message ?: "写入下载目录失败")
+    activity.runBackground(invoke, "写入下载目录失败") {
+      val resolver = activity.contentResolver
+      val name = uniqueDownloadsName(resolver, fileName)
+      val values = ContentValues().apply {
+        put(MediaStore.Downloads.DISPLAY_NAME, name)
+        put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+        put(MediaStore.Downloads.IS_PENDING, 1)
       }
-    }.start()
+      val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        ?: throw IllegalStateException("无法在下载目录创建文件")
+      try {
+        resolver.openOutputStream(uri)?.use { out ->
+          copyFileWithProgress(src, out, channel)
+        } ?: throw IllegalStateException("无法写入下载目录")
+        val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+        resolver.update(uri, done, null, null)
+        activity.resolveOnUi(invoke) { JSObject().put("name", name) }
+      } catch (e: Throwable) {
+        runCatching { resolver.delete(uri, null, null) }
+        throw e
+      }
+    }
   }
 
   /** 下载目录里已有同名文件时加 " (n)"，与桌面端 unique_dest_path 同一规则：
@@ -451,18 +435,14 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
     }
     val src = File(args.path ?: "")
     val channel = args.channel
-    Thread {
-      try {
-        if (!src.isFile) throw IllegalStateException("找不到待导出的文件")
-        val name = sanitizeName(queryDisplayName(uri) ?: args.fileName ?: "漫画.zip")
-        activity.contentResolver.openOutputStream(uri)?.use { out ->
-          copyFileWithProgress(src, out, channel)
-        } ?: throw IllegalStateException("无法写入所选位置")
-        resolveOnUi(invoke) { JSObject().put("name", name) }
-      } catch (e: Throwable) {
-        rejectOnUi(invoke, e.message ?: "写入所选位置失败")
-      }
-    }.start()
+    activity.runBackground(invoke, "写入所选位置失败") {
+      if (!src.isFile) throw IllegalStateException("找不到待导出的文件")
+      val name = sanitizeName(queryDisplayName(uri) ?: args.fileName ?: "漫画.zip")
+      activity.contentResolver.openOutputStream(uri)?.use { out ->
+        copyFileWithProgress(src, out, channel)
+      } ?: throw IllegalStateException("无法写入所选位置")
+      activity.resolveOnUi(invoke) { JSObject().put("name", name) }
+    }
   }
 
   /** 把文件复制进输出流，按 8KB 块回调进度（节流在 reportSave 里做）。
@@ -555,14 +535,6 @@ class ConceitPlugin(private val activity: Activity) : Plugin(activity) {
       }
     }
     return null
-  }
-
-  private fun resolveOnUi(invoke: Invoke, build: () -> JSObject) {
-    activity.runOnUiThread { invoke.resolve(build()) }
-  }
-
-  private fun rejectOnUi(invoke: Invoke, message: String) {
-    activity.runOnUiThread { invoke.reject(message) }
   }
 
   private fun prepareDir(name: String, wipe: Boolean = false): File {
