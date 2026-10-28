@@ -789,15 +789,38 @@ pub fn make_cover_thumb(root: &Path, id: &str, cover_rel: &str) -> Option<String
     let scale = THUMB_MAX_EDGE as f32 / longest as f32;
     let nw = ((w as f32 * scale).round() as u32).max(1);
     let nh = ((h as f32 * scale).round() as u32).max(1);
-    let rgb = img.thumbnail(nw, nh).to_rgb8();
+    // thumbnail() 内部会按宽高比重算尺寸（image 的 resize_dimensions 取
+    // min(nw/w, nh/h) 再各自取整），返回值不保证等于请求的 (nw, nh)：
+    // 「长边顶到 480」与宽高比取整差半个像素时就会小 1px——1023×1537
+    // 请求 319×480，实得 319×479。而 JpegEncoder::encode 的契约是
+    // width*height*bpp == buf.len()，不满足直接 assert_eq! panic（不是
+    // Err，.ok()? 兜不住），曾让含这种封面的漫画一导入就闪退。
+    // 因此一律按 thumbnail 的实际尺寸编码。
+    let thumb = img.thumbnail(nw, nh);
+    let (tw, th) = (thumb.width(), thumb.height());
+    let rgb = thumb.to_rgb8();
     let dir = root.join(THUMB_DIR_NAME);
     fs::create_dir_all(&dir).ok()?;
     let rel = format!("{THUMB_DIR_NAME}/{id}.jpg");
     let file = fs::File::create(root.join(&rel)).ok()?;
     let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(file, THUMB_QUALITY);
-    enc.encode(rgb.as_raw(), nw, nh, image::ExtendedColorType::Rgb8)
-        .ok()?;
-    Some(rel)
+    // 编码阶段同样兜一层 panic（与 decode_within_budget 同一理由）：缩略图
+    // 失败本该只是回退原图，不能杀进程。半成品文件要删掉，否则书架会显示
+    // 一张解码不出来的封面。
+    let encoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        enc.encode(rgb.as_raw(), tw, th, image::ExtendedColorType::Rgb8)
+    }));
+    match encoded {
+        Ok(Ok(())) => Some(rel),
+        _ => {
+            eprintln!(
+                "生成封面缩略图失败（编码阶段，封面将回退原图）: {}",
+                src.display()
+            );
+            let _ = fs::remove_file(root.join(&rel));
+            None
+        }
+    }
 }
 
 /// 读每页图片的文件头测像素尺寸（不解码像素，开销极小）。
@@ -1831,6 +1854,41 @@ mod tests {
 
         remove_cover_thumb(&root, "m1");
         assert!(!out.exists());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cover_thumb_survives_aspect_ratio_off_by_one() {
+        // 回归：thumbnail() 内部按宽高比重算尺寸（resize_dimensions 取
+        // min(nw/w, nh/h) 后各自取整），不保证等于请求的 (nw, nh)。1023×1537
+        // 请求 319×480、实得 319×479；800×1169 请求 328×480、实得 328×479。
+        // 旧代码把请求尺寸喂给 JpegEncoder::encode，其契约是
+        // width*height*bpp == buf.len()，差 1px 直接 panic（不是 Err），
+        // 且不在 decode_within_budget 的 catch_unwind 内——含这种封面的
+        // 漫画一导入（或体检重扫 / 补缩略图）就闪退。这里锁死修复后的行为。
+        let root = temp_dir("thumb-offbyone");
+        let src = root.join(MANGA_DIR_NAME).join("m1");
+        fs::create_dir_all(&src).unwrap();
+        for (name, w, h) in [("001.png", 1023u32, 1537u32), ("002.png", 800, 1169)] {
+            let img = image::RgbImage::from_fn(w, h, |x, y| {
+                image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+            });
+            img.save(src.join(name)).unwrap();
+
+            let rel = make_cover_thumb(&root, "m1", name)
+                .unwrap_or_else(|| panic!("应生成缩略图: {name}"));
+            let out = root.join(&rel);
+            assert!(out.exists());
+            let (tw, th) = image::image_dimensions(&out).unwrap();
+            assert!(
+                tw <= THUMB_MAX_EDGE && th <= THUMB_MAX_EDGE,
+                "{name}: 缩略图超限 {tw}x{th}"
+            );
+            // 输出必须是能完整解码的 JPEG（编码阶段 panic 已被兜住并回退）
+            assert!(image::open(&out).is_ok(), "{name}: 缩略图无法解码");
+
+            remove_cover_thumb(&root, "m1");
+        }
         fs::remove_dir_all(&root).ok();
     }
 
